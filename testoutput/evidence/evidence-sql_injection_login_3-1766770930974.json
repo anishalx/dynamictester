@@ -1,0 +1,8 @@
+{
+  "id": "sql_injection_login_3",
+  "type": "SQL Injection",
+  "evidence": "Unable to interact with the login button.",
+  "payload": "' OR 1=1 -- ",
+  "success": false,
+  "timestamp": "2025-12-26T17:42:10.974Z"
+}

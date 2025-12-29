@@ -1,0 +1,8 @@
+{
+  "id": "sql_injection_test_login",
+  "type": "SQL Injection",
+  "evidence": "Failed to exploit login due to visibility issues.",
+  "payload": "' UNION SELECT NULL -- ",
+  "success": false,
+  "timestamp": "2025-12-26T17:41:40.274Z"
+}

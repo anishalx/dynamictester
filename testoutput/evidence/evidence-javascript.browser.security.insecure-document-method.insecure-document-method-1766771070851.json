@@ -1,0 +1,8 @@
+{
+  "id": "javascript.browser.security.insecure-document-method.insecure-document-method",
+  "type": "DOMXSS",
+  "evidence": "Tried injecting payload with onmouseover event but no alerts were executed.",
+  "payload": "' onmouseover='alert(1)",
+  "success": false,
+  "timestamp": "2025-12-26T17:44:30.851Z"
+}

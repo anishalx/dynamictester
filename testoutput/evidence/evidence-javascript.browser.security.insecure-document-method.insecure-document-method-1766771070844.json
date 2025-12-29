@@ -1,0 +1,8 @@
+{
+  "id": "javascript.browser.security.insecure-document-method.insecure-document-method",
+  "type": "DOMXSS",
+  "evidence": "Tested multiple payloads in the email field but no alerts were generated, indicating a potential filtering/sanitization issue.",
+  "payload": "<img src=x onerror=alert(1)>",
+  "success": false,
+  "timestamp": "2025-12-26T17:44:30.844Z"
+}
