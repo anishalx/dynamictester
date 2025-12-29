@@ -1,7 +1,6 @@
-
-output/
-testoutput/
-static-analyzer-results/
-node_modules/
+./output
+./testoutput
+./static-analyzer-results
+./node_modules
 .env
-package-lock.json
+
