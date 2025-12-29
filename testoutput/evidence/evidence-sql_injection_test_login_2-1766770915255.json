@@ -1,8 +1,0 @@
-{
-  "id": "sql_injection_test_login_2",
-  "type": "SQL Injection",
-  "evidence": "Failed to exploit login due to visibility issues.",
-  "payload": "' OR '1'='1' -- ",
-  "success": false,
-  "timestamp": "2025-12-26T17:41:55.255Z"
-}

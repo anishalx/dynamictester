@@ -1,8 +1,0 @@
-{
-  "id": "javascript.browser.security.insecure-document-method.insecure-document-method",
-  "type": "DOMXSS",
-  "evidence": "No payload was executed successfully, unable to test the first vulnerability due to hidden inputs.",
-  "payload": "<script>alert(1)</script>",
-  "success": false,
-  "timestamp": "2025-12-26T17:44:30.840Z"
-}
