@@ -1,464 +1,64 @@
 # Dynamic Security Tester
 
-**An AI-powered dynamic security testing tool that bridges static analysis with automated exploitation testing.**
+**Industry-grade AI-powered dynamic security testing tool that bridges static analysis with automated exploitation validation.**
 
-This tool takes vulnerability findings from static analysis tools (like Semgrep) and uses OpenAI's GPT models combined with Playwright browser automation to dynamically test and validate those vulnerabilities against a running web application.
+Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL, etc.) and uses OpenAI's GPT-4 combined with Playwright browser automation to dynamically test, validate, and generate developer-friendly reports.
 
 ---
 
-## Table of Contents
+## ✨ Key Features
 
-- [Overview](#overview)
+| Feature | Description |
+|---------|-------------|
+| **Multi-Analyzer Support** | Semgrep, Trivy, CodeQL, Syft, and custom parsers |
+| **Universal Prompts** | Context-aware testing for any web application |
+| **LLM-Crafted Payloads** | Technology-specific payloads from static analysis context |
+| **Source Code Mapping** | Links findings to exact `file:line:column` for developers |
+| **Industry Reports** | SARIF for IDE integration, HTML for stakeholders |
+| **Advanced Browser Tools** | HTTP requests, force clicks, scrolling, script execution |
+
+---
+
+## 📋 Table of Contents
+
 - [Architecture](#architecture)
-- [Directory Structure](#directory-structure)
-- [How It Works](#how-it-works)
-- [Module Reference](#module-reference)
-- [Prompt Templates](#prompt-templates)
-- [Available Browser Tools](#available-browser-tools)
 - [Installation](#installation)
-- [Usage](#usage)
+- [Quick Start](#quick-start)
+- [Output & Reports](#output--reports)
+- [Browser Tools](#browser-tools)
+- [Prompt Templates](#prompt-templates)
 - [Configuration](#configuration)
-- [Output Structure](#output-structure)
 - [Extending the Tool](#extending-the-tool)
 - [Troubleshooting](#troubleshooting)
-
----
-
-## Overview
-
-The **Dynamic Security Tester** automates the process of validating security vulnerabilities discovered during static analysis. Instead of manually testing each finding, this tool:
-
-1. **Parses** static analysis results (Semgrep JSON format)
-2. **Categorizes** vulnerabilities by type (XSS, Injection, SSRF, Secrets, etc.)
-3. **Generates** exploitation queues for each category
-4. **Deploys** AI agents that use browser automation to test vulnerabilities
-5. **Documents** evidence of successful exploits
-
-```
-┌─────────────────────┐     ┌──────────────────────┐     ┌─────────────────────┐
-│   Static Analysis   │────▶│  Dynamic Security    │────▶│   Exploitation      │
-│   (Semgrep)         │     │  Tester              │     │   Evidence          │
-│   result.json       │     │                      │     │   & Reports         │
-└─────────────────────┘     └──────────────────────┘     └─────────────────────┘
-```
 
 ---
 
 ## Architecture
 
 ```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                           DYNAMIC SECURITY TESTER                          │
-├────────────────────────────────────────────────────────────────────────────┤
-│                                                                            │
-│  ┌─────────────────┐                                                       │
-│  │    main.js      │  CLI Entry Point - Interactive prompts                │
-│  │    (CLI)        │  Orchestrates the entire workflow                     │
-│  └────────┬────────┘                                                       │
-│           │                                                                │
-│           ▼                                                                │
-│  ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐      │
-│  │  result-parser  │────▶│ queue-generator │────▶│    executor     │      │
-│  │                 │     │                 │     │                 │      │
-│  │  Parses Semgrep │     │ Groups vulns by │     │ OpenAI Agent    │      │
-│  │  JSON output    │     │ type & creates  │     │ with browser    │      │
-│  │                 │     │ queue files     │     │ tools           │      │
-│  └─────────────────┘     └─────────────────┘     └────────┬────────┘      │
-│                                                           │                │
-│                                                           ▼                │
-│                                              ┌─────────────────┐           │
-│                                              │ browser-server  │           │
-│                                              │                 │           │
-│                                              │ Playwright      │           │
-│                                              │ automation      │           │
-│                                              │ tools           │           │
-│                                              └─────────────────┘           │
-│                                                                            │
-└────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Directory Structure
-
-```
-dynamictest/
-├── src/
-│   ├── main.js                    # CLI entry point and workflow orchestrator
-│   ├── agents/
-│   │   └── executor.js            # OpenAI agent execution engine
-│   ├── mcp/
-│   │   └── browser-server.js      # Playwright browser automation tools
-│   ├── parser/
-│   │   └── result-parser.js       # Semgrep result JSON parser
-│   ├── queue/
-│   │   └── queue-generator.js     # Vulnerability queue generator
-│   └── reporter/                  # (Future) Report generation module
-├── prompts/
-│   ├── exploit-xss.txt            # XSS exploitation prompt template
-│   ├── exploit-injection.txt      # SQL/Command injection prompt
-│   ├── exploit-secrets.txt        # Secrets/credentials analysis prompt
-│   └── exploit-generic.txt        # Generic vulnerability testing prompt
-├── static-analyzer-results/
-│   └── result.json                # Semgrep output (input to this tool)
-├── output/
-│   └── deliverables/              # Generated exploitation queue files
-│       ├── xss_exploitation_queue.json
-│       ├── injection_exploitation_queue.json
-│       ├── secrets_exploitation_queue.json
-│       └── crypto_exploitation_queue.json
-├── package.json
-└── README.md
-```
-
----
-
-## How It Works
-
-### Step 1: Parse Static Analysis Results (`result-parser.js`)
-
-The parser reads a Semgrep JSON result file and extracts vulnerability information:
-
-```javascript
-// Input: Semgrep result.json
-{
-  "results": [
-    {
-      "check_id": "javascript.express.security.audit.xss.mustache-escape...",
-      "path": "src/routes/search.js",
-      "start": { "line": 42, "col": 5 },
-      "extra": {
-        "message": "Detected user input...",
-        "metadata": {
-          "cwe": ["CWE-79"],
-          "vulnerability_class": ["Cross-Site-Scripting"]
-        }
-      }
-    }
-  ]
-}
-```
-
-The parser maps Semgrep findings to internal vulnerability types:
-
-| Vulnerability Class | Internal Type | OWASP 2021 |
-|---------------------|---------------|------------|
-| SQL Injection, Command Injection, Code Injection, LDAP, XPath | `injection` | A03:2021 |
-| Cross-Site Scripting (XSS) | `xss` | A03:2021 |
-| Server-Side Request Forgery | `ssrf` | A10:2021 |
-| XML External Entity (XXE) | `xxe` | A05:2021 |
-| Cross-Site Request Forgery | `csrf` | A01:2021 |
-| Insecure Deserialization | `deserialization` | A08:2021 |
-| Open Redirect | `redirect` | A01:2021 |
-| Hardcoded Secrets, Credentials | `secrets` | A02:2021 |
-| Cryptographic Issues | `crypto` | A02:2021 |
-| Authentication Issues | `auth` | A07:2021 |
-| Path Traversal | `traversal` | A01:2021 |
-| File Upload | `upload` | A04:2021 |
-| IDOR / Broken Access Control | `access` | A01:2021 |
-| Everything else | `other` | - |
-
-### Step 2: Generate Exploitation Queues (`queue-generator.js`)
-
-Groups vulnerabilities by type and creates JSON queue files:
-
-```javascript
-// Output: xss_exploitation_queue.json
-{
-  "vulnerabilities": [
-    {
-      "id": "javascript.express.security.audit.xss...",
-      "checkId": "xss-reflected-input",
-      "verdict": "vulnerable",
-      "confidence": "MEDIUM",
-      "vulnerabilityType": "ReflectedXSS",
-      "source": "src/routes/search.js:42",
-      "file": "src/routes/search.js",
-      "line": 42,
-      "description": "User input directly rendered...",
-      "cwe": ["CWE-79"],
-      "witnessPayload": "<img src=x onerror=alert(1)>"
-    }
-  ]
-}
-```
-
-**Witness Payloads**: The queue generator creates initial test payloads:
-
-| Vulnerability Type | Witness Payload |
-|--------------------|-----------------|
-| SQLi | `' OR '1'='1' --` |
-| Command Injection | `; whoami` |
-| Eval Injection | `require('child_process').execSync('id')` |
-| SSTI | `{{7*7}}` |
-| XSS (all types) | `<img src=x onerror=alert(1)>` |
-| XXE | `<?xml ...<!ENTITY xxe SYSTEM "file:///etc/passwd">]>` |
-| Deserialization | `O:8:"stdClass":0:{}` |
-
-### Step 3: Execute AI Agent (`executor.js`)
-
-The executor creates an OpenAI-powered agent loop:
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                       AGENT EXECUTION LOOP                          │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  1. Load prompt template + interpolate variables                    │
-│     ({{WEB_URL}}, {{QUEUE_PATH}})                                  │
-│                                                                     │
-│  2. Send to OpenAI with tool definitions                           │
-│     ┌──────────────────────────────────────────────────────────┐   │
-│     │  System: You are an XSS Exploitation Specialist...       │   │
-│     │  User: Target: http://localhost:3000                     │   │
-│     │        Vulnerabilities to test: ...                      │   │
-│     └──────────────────────────────────────────────────────────┘   │
-│                                                                     │
-│  3. Agent calls tools (browser_navigate, browser_fill, etc.)       │
-│                                                                     │
-│  4. Execute tool, return result to agent                           │
-│                                                                     │
-│  5. Repeat until agent finishes or max_turns (30) reached          │
-│                                                                     │
-│  6. Evidence saved to output/evidence/                             │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Module Reference
-
-### `src/main.js` - CLI Entry Point
-
-**Purpose**: Interactive command-line interface that orchestrates the entire workflow.
-
-**Key Functions**:
-- `main()` - Main entry point, prompts user for:
-  - Path to static analyzer result.json
-  - Target URL for dynamic testing
-  - Output directory
-- `createGenericPrompt()` - Creates fallback prompt template if missing
-
-**Prompt Mapping**:
-```javascript
-const promptMapping = {
-  injection: 'exploit-injection.txt',
-  xss: 'exploit-xss.txt',
-  ssrf: 'exploit-ssrf.txt',
-  secrets: 'exploit-secrets.txt',
-  auth: 'exploit-auth.txt',
-  other: 'exploit-generic.txt'
-};
-```
-
----
-
-### `src/parser/result-parser.js` - Static Analysis Parser
-
-**Purpose**: Parse Semgrep JSON output and normalize vulnerabilities.
-
-**Exports**:
-```javascript
-export async function parseStaticAnalysisResult(resultJsonPath)
-```
-
-**Returns**: Array of normalized vulnerability objects:
-```javascript
-{
-  id: string,              // Unique identifier
-  type: string,            // Internal type (injection, xss, etc.)
-  severity: string,        // ERROR, WARNING, INFO
-  confidence: string,      // HIGH, MEDIUM, LOW
-  location: {
-    file: string,
-    line: number,
-    column: number,
-    endLine: number,
-    endColumn: number
-  },
-  description: string,     // Vulnerability message
-  cwe: string[],           // CWE identifiers
-  owasp: string[],         // OWASP categories
-  vulnerabilityClass: string[],
-  checkId: string,         // Original Semgrep check ID
-  shortlink: string        // Reference URL
-}
-```
-
-**Mapping Logic** (in `mapVulnerabilityType()`):
-1. Check `vulnerability_class` metadata
-2. Check CWE codes
-3. Check `check_id` patterns
-4. Default to `'other'`
-
----
-
-### `src/queue/queue-generator.js` - Queue Generator
-
-**Purpose**: Group vulnerabilities by type and generate exploitation queue files.
-
-**Exports**:
-```javascript
-export async function generateExploitationQueue(vulnerabilities, outputDir)
-```
-
-**Queue Categories**:
-- `injection` - SQL, Command, Code, LDAP, XPath injection
-- `xss` - Cross-Site Scripting (Reflected, Stored, DOM)
-- `ssrf` - Server-Side Request Forgery
-- `xxe` - XML External Entity
-- `csrf` - Cross-Site Request Forgery
-- `deserialization` - Insecure Deserialization
-- `redirect` - Open Redirect
-- `auth` - Authentication issues
-- `secrets` - Hardcoded credentials
-- `crypto` - Cryptographic issues
-- `traversal` - Path Traversal
-- `upload` - File Upload
-- `access` - IDOR / Broken Access Control
-- `other` - Everything else
-
-**Helper Functions**:
-- `getVulnerabilitySubType(vuln)` - Determines specific subtype (SQLi, DOMXSS, etc.)
-- `generateWitnessPayload(vuln)` - Creates initial test payload
-
----
-
-### `src/agents/executor.js` - AI Agent Executor
-
-**Purpose**: Execute OpenAI-powered agent for dynamic testing.
-
-**Exports**:
-```javascript
-export async function executeExploitationAgent(
-  promptTemplate,  // Path to prompt .txt file
-  queuePath,       // Path to vulnerability queue JSON
-  targetUrl,       // Target web application URL
-  outputDir,       // Output directory for evidence
-  options = {}     // { model: 'gpt-4o-mini' }
-)
-```
-
-**Returns**:
-```javascript
-{
-  success: boolean,
-  turns: number,      // Number of agent turns
-  error?: string      // Error message if failed
-}
-```
-
-**Key Configuration**:
-- `MAX_TOOL_RESULT_LENGTH = 8000` - Truncate tool results to avoid token limits
-- `maxTurns = 30` - Maximum agent conversation turns
-- `max_tokens = 1000` - Limit response size per turn
-
-**Built-in Tools**:
-- `save_evidence({ id, type, evidence, payload, success })` - Save exploitation evidence
-- `read_queue_file({ filePath })` - Read vulnerability queue (limited to first 5)
-
----
-
-### `src/mcp/browser-server.js` - Browser Automation
-
-**Purpose**: Playwright-based browser automation tools for the AI agent.
-
-**Class**: `BrowserManager`
-
-**Configuration**:
-- `MAX_CONTENT_LENGTH = 15000` - Max chars to return from page
-- Headless Chromium browser
-- 30-second navigation timeout
-- 10-second selector timeout
-
----
-
-## Available Browser Tools
-
-The AI agent has access to these browser automation tools:
-
-| Tool Name | Description | Parameters |
-|-----------|-------------|------------|
-| `browser_navigate` | Navigate to a URL | `url: string` |
-| `browser_fill` | Fill a form field | `selector: string, value: string` |
-| `browser_click` | Click an element | `selector: string` |
-| `browser_type_and_submit` | Type text and press Enter | `selector: string, value: string` |
-| `browser_get_response` | Get page information | `extract?: 'summary' \| 'full'` |
-| `browser_close` | Close the browser | - |
-
-### `browser_get_response` Details
-
-By default (`extract: 'summary'`), returns:
-```javascript
-{
-  status: 'success',
-  url: string,
-  title: string,
-  forms: [{
-    action: string,
-    method: string,
-    id: string,
-    inputs: [{ name, type, id, placeholder }]
-  }],
-  inputs: [{ name, type, id, placeholder, selector }],
-  links: [{ href, text }],
-  scripts: [string],  // Script sources
-  text: string        // Visible text (first 5000 chars)
-}
-```
-
-With `extract: 'full'`, returns truncated HTML content.
-
----
-
-## Prompt Templates
-
-Prompt templates are located in `prompts/` and use placeholder variables:
-
-| Variable | Description |
-|----------|-------------|
-| `{{WEB_URL}}` | Target web application URL |
-| `{{QUEUE_PATH}}` | Path to the vulnerability queue JSON file |
-
-### Template Structure
-
-```xml
-<role>
-You are an [Specialist Type]. Your goal is to...
-</role>
-
-<objective>
-Test every vulnerability in the queue file: {{QUEUE_PATH}}
-For each vulnerability, generate appropriate payloads...
-</objective>
-
-<starting_context>
-1. Read the exploitation queue
-2. For each vulnerability: [specific steps]
-3. Test payloads using browser automation
-4. Save findings using save_evidence
-</starting_context>
-
-<available_tools>
-- browser_navigate: Navigate to a URL
-- browser_fill: Fill form fields
-- browser_click: Click buttons
-- browser_get_response: Get page content
-- save_evidence: Save exploitation evidence
-</available_tools>
-
-<methodology>
-[Specific testing methodology for this vulnerability type]
-</methodology>
-
-<deliverable>
-Create an evidence file documenting:
-- Each vulnerability tested
-- Payloads used
-- Results (success/failure)
-- Proof of exploitation
-</deliverable>
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        DYNAMIC SECURITY TESTER                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐   ┌─────────────────┐  │
+│  │   Parser    │──▶│   Queue     │──▶│  Executor   │──▶│    Reports      │  │
+│  │             │   │  Generator  │   │             │   │                 │  │
+│  │ Semgrep     │   │             │   │ OpenAI GPT  │   │ • SARIF         │  │
+│  │ Trivy       │   │ Groups by   │   │ LLM Agent   │   │ • HTML          │  │
+│  │ CodeQL      │   │ vuln type   │   │             │   │ • JSON Summary  │  │
+│  │ Syft        │   │             │   │             │   │                 │  │
+│  └─────────────┘   └─────────────┘   └──────┬──────┘   └─────────────────┘  │
+│                                             │                                │
+│                                    ┌────────▼────────┐                       │
+│                                    │ Browser Manager │                       │
+│                                    │                 │                       │
+│                                    │ • HTTP Requests │                       │
+│                                    │ • Form Filling  │                       │
+│                                    │ • Force Click   │                       │
+│                                    │ • Script Exec   │                       │
+│                                    └─────────────────┘                       │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -467,16 +67,13 @@ Create an evidence file documenting:
 
 ### Prerequisites
 
-- Node.js 18+ 
+- Node.js 18+
 - npm
 - OpenAI API key
 
 ### Setup
 
 ```bash
-# Clone or navigate to the project
-cd dynamictest
-
 # Install dependencies
 npm install
 
@@ -487,32 +84,18 @@ export OPENAI_API_KEY="your-api-key-here"
 npx playwright install chromium
 ```
 
-### Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| `openai` | OpenAI API client |
-| `playwright` | Browser automation |
-| `chalk` | Terminal colors |
-| `inquirer` | Interactive CLI prompts |
-| `zx` | Shell scripting utilities |
-| `js-yaml` | YAML parsing (if needed) |
-
 ---
 
-## Usage
-
-### Basic Usage
+## Quick Start
 
 ```bash
-# Run the tool
 node src/main.js
 ```
 
-The interactive CLI will prompt for:
-1. **Path to static analyzer result.json** - Semgrep output file
-2. **Target URL** - Web application to test (default: http://localhost:3000)
-3. **Output directory** - Where to save results (default: ./output)
+**Interactive prompts:**
+1. Path to static analyzer result.json
+2. Target URL for testing (e.g., `http://localhost:3000`)
+3. Output directory
 
 ### Example Session
 
@@ -520,37 +103,204 @@ The interactive CLI will prompt for:
 🔍 Dynamic Security Tester (OpenAI Powered)
 ────────────────────────────────────────────────────────────────
 
-? Path to static analyzer result.json: ./static-analyzer-results/result.json
-? Target URL for dynamic testing: http://localhost:3000
-? Output directory for results: ./output
-
-Processing:
-- Result: ./static-analyzer-results/result.json
-- Target: http://localhost:3000
-- Output: ./output
-────────────────────────────────────────────────
-
 📋 Step 1: Parsing static analysis results...
-✅ Parsed 15 vulnerabilities from 20 total findings
-   - injection: 5
-   - xss: 4
-   - secrets: 3
-   - crypto: 3
+✅ Parsed 15 vulnerabilities
 
 📋 Step 2: Generating exploitation queues...
-✅ Created injection_exploitation_queue.json with 5 vulnerabilities
-✅ Created xss_exploitation_queue.json with 4 vulnerabilities
-✅ Created secrets_exploitation_queue.json with 3 vulnerabilities
-✅ Created crypto_exploitation_queue.json with 3 vulnerabilities
+✅ Created injection_exploitation_queue.json (5 vulnerabilities)
+✅ Created xss_exploitation_queue.json (4 vulnerabilities)
 
 📋 Step 3: Reviewing vulnerabilities...
-
 🎯 Found 5 INJECTION vulnerabilities:
-   1. SQLi in src/routes/users.js
-   2. CommandInjection in src/utils/shell.js
-   ... and 3 more
+   1. SQLi in routes/login.ts:34
+   2. CommandInjection in utils/exec.js:12
 
 ? Run dynamic exploitation tests for injection? (Y/n)
+
+📋 Generating reports...
+✅ SARIF report saved: output/report.sarif.json
+✅ HTML report saved: output/report.html
+
+🎉 Dynamic testing session complete!
+
+Output files:
+  • evidence/           - Individual finding details
+  • findings_summary.json - Quick summary for developers
+  • report.sarif.json   - SARIF for IDE integration
+  • report.html         - Visual HTML report
+```
+
+---
+
+## Output & Reports
+
+### Directory Structure
+
+```
+output/
+├── evidence/                       # Individual findings
+│   ├── evidence-vuln-001.json
+│   └── evidence-vuln-002.json
+├── deliverables/                   # Exploitation queues
+│   ├── injection_exploitation_queue.json
+│   └── xss_exploitation_queue.json
+├── findings_summary.json           # Quick summary
+├── developer_summary.json          # Categorized findings
+├── report.sarif.json               # SARIF for VS Code
+└── report.html                     # Visual HTML report
+```
+
+### Evidence Format (Developer-Friendly)
+
+```json
+{
+  "findingId": "javascript.sequelize.sql-injection",
+  "timestamp": "2024-01-15T10:30:00.000Z",
+  
+  "sourceLocation": {
+    "file": "routes/login.ts",
+    "line": 34,
+    "column": 28
+  },
+  
+  "vulnerability": {
+    "type": "SQL Injection",
+    "cwe": "CWE-89",
+    "owasp": "A03:2021"
+  },
+  
+  "exploitation": {
+    "endpoint": "/api/login",
+    "method": "POST",
+    "payload": "' OR '1'='1'--",
+    "success": true,
+    "proof": "Authenticated as admin without password"
+  },
+  
+  "remediation": "Use parameterized queries with Sequelize replacements",
+  "status": "CONFIRMED"
+}
+```
+
+### SARIF Report
+
+Integrates with VS Code, GitHub Code Scanning, and other IDEs:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/...",
+  "version": "2.1.0",
+  "runs": [{
+    "tool": { "driver": { "name": "DynamicSecurityTester" } },
+    "results": [
+      {
+        "ruleId": "CWE-89",
+        "level": "error",
+        "locations": [{
+          "physicalLocation": {
+            "artifactLocation": { "uri": "routes/login.ts" },
+            "region": { "startLine": 34, "startColumn": 28 }
+          }
+        }]
+      }
+    ]
+  }]
+}
+```
+
+### HTML Report
+
+Professional dark-themed report with:
+- Confirmed vs Not Exploitable summary
+- Source code locations (file:line:column)
+- Payload details and exploitation proof
+- Remediation suggestions
+- OWASP/CWE references
+
+---
+
+## Browser Tools
+
+The AI agent has access to 13 browser automation tools:
+
+| Tool | Description |
+|------|-------------|
+| `browser_navigate` | Navigate to a URL |
+| `browser_fill` | Fill form fields |
+| `browser_click` | Click elements |
+| `browser_type_and_submit` | Type text + Enter |
+| `browser_get_response` | Get page content (forms, inputs, links) |
+| `browser_screenshot` | Take screenshot for evidence |
+| `browser_close` | Close browser |
+| **Advanced Tools** | |
+| `browser_force_click` | JavaScript click (bypasses visibility) |
+| `browser_scroll` | Scroll page (up/down/top/bottom) |
+| `browser_wait_for_element` | Wait for SPA content |
+| `browser_http_request` | **Direct HTTP/API requests** |
+| `browser_execute_script` | Execute JavaScript in page |
+
+### `browser_http_request` (Most Important)
+
+Enables direct API testing without browser UI:
+
+```javascript
+// Test SQL injection on REST API
+browser_http_request({
+  url: "https://example.com/api/login",
+  method: "POST",
+  body: '{"email": "\' OR 1=1--", "password": "x"}',
+  contentType: "application/json"
+})
+
+// Returns
+{
+  status: "success",
+  httpStatus: 200,
+  body: "{\"token\": \"admin-jwt-token\"}",
+  json: { token: "admin-jwt-token" }
+}
+```
+
+---
+
+## Prompt Templates
+
+All prompts are **universal** - they work on any application by deriving endpoints from source code paths.
+
+| Prompt | Vulnerability Type | Key Features |
+|--------|-------------------|--------------|
+| `exploit-injection.txt` | SQLi, Command Injection | Technology-aware payloads (MySQL, PostgreSQL, SQLite) |
+| `exploit-xss.txt` | Cross-Site Scripting | Context-aware (HTML, Attribute, JavaScript, DOM) |
+| `exploit-traversal.txt` | Path Traversal | OS-aware with encoding variations |
+| `exploit-xxe.txt` | XML External Entity | Parser-specific payloads |
+| `exploit-redirect.txt` | Open Redirect | Whitelist bypass techniques |
+| `exploit-secrets.txt` | Hardcoded Secrets | Credential validation |
+| `exploit-ssrf.txt` | Server-Side Request Forgery | Internal network probing |
+| `exploit-generic.txt` | Any vulnerability | General testing methodology |
+
+### Endpoint Discovery
+
+Prompts derive endpoints from source file paths:
+
+```
+routes/login.ts      → /login, /api/login
+controllers/users.js → /users, /api/users
+api/v1/products.js   → /api/v1/products
+```
+
+### Payload Crafting
+
+Payloads are crafted based on static analysis context:
+
+```
+Technology: Sequelize (from metadata)
+→ SQLi payloads: ' OR '1'='1'--, ' UNION SELECT...
+
+Technology: PostgreSQL
+→ Time-based: '; SELECT pg_sleep(5)--
+
+Context: Linux server
+→ Command injection: ; cat /etc/passwd
 ```
 
 ---
@@ -559,57 +309,30 @@ Processing:
 
 ### Environment Variables
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `OPENAI_API_KEY` | Your OpenAI API key | Yes |
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENAI_API_KEY` | Yes | OpenAI API key |
+
+### Key Settings in `executor.js`
+
+```javascript
+const maxTurns = 50;              // Max agent conversation turns
+const MAX_TOOL_RESULT_LENGTH = 8000;  // Truncate tool results
+```
+
+### Timeouts in `browser-server.js`
+
+```javascript
+const DEFAULT_TIMEOUT = 5000;  // 5 seconds (reduced for faster feedback)
+const SHORT_TIMEOUT = 2000;    // 2 seconds for quick checks
+```
 
 ### Model Selection
 
-The default model is `gpt-4o-mini`. To use a different model, modify `executor.js`:
+Default is `gpt-4o`. Change in executor.js:
 
 ```javascript
-const model = options.model || 'gpt-4o-mini';
-```
-
-### Timeouts
-
-Adjust in `browser-server.js`:
-```javascript
-// Navigation timeout
-await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-
-// Selector timeout
-await this.page.waitForSelector(selector, { timeout: 10000 });
-```
-
----
-
-## Output Structure
-
-```
-output/
-├── deliverables/                      # Exploitation queue files
-│   ├── injection_exploitation_queue.json
-│   ├── xss_exploitation_queue.json
-│   ├── secrets_exploitation_queue.json
-│   └── crypto_exploitation_queue.json
-└── evidence/                          # Exploitation evidence
-    ├── evidence-vuln-001-1703773456.json
-    ├── evidence-vuln-002-1703773489.json
-    └── ...
-```
-
-### Evidence File Format
-
-```javascript
-{
-  "id": "vuln-001",
-  "type": "xss",
-  "evidence": "XSS payload executed successfully. Alert box appeared.",
-  "payload": "<img src=x onerror=alert(1)>",
-  "success": true,
-  "timestamp": "2024-12-28T10:30:00.000Z"
-}
+const model = options.model || 'gpt-4o';
 ```
 
 ---
@@ -618,137 +341,57 @@ output/
 
 ### Adding New Vulnerability Types
 
-1. **Update the parser** (`result-parser.js`):
+1. **Update parser** (`src/parser/result-parser.js`):
 ```javascript
-// In mapVulnerabilityType()
-if (vcLower.includes('your-new-type')) return 'newtype';
+if (vcLower.includes('new-vuln-type')) return 'newtype';
 ```
 
-2. **Add queue category** (`queue-generator.js`):
+2. **Add queue category** (`src/queue/queue-generator.js`):
 ```javascript
-const queues = {
-  // ... existing
-  newtype: []
-};
+const queues = { /* existing */, newtype: [] };
 ```
 
-3. **Create prompt template** (`prompts/exploit-newtype.txt`)
+3. **Create prompt** (`prompts/exploit-newtype.txt`)
 
-4. **Update prompt mapping** (`main.js`):
+4. **Add mapping** (`src/main.js`):
 ```javascript
-const promptMapping = {
-  // ... existing
-  newtype: 'exploit-newtype.txt'
-};
+const promptMapping = { /* existing */, newtype: 'exploit-newtype.txt' };
 ```
 
-### Adding New Browser Tools
+### Adding Browser Tools
 
-Add to `BrowserManager.getTools()` in `browser-server.js`:
+In `src/mcp/browser-server.js`:
 
 ```javascript
+async customAction({ param1 }) {
+  // Implementation
+  return { status: 'success', data: result };
+}
+
+// Add to getTools()
 {
   name: 'browser_custom_action',
-  description: 'Description of what this tool does',
-  parameters: {
-    type: 'object',
-    properties: {
-      param1: { type: 'string', description: 'Parameter description' }
-    },
-    required: ['param1']
-  },
+  description: 'What this tool does',
+  parameters: { type: 'object', properties: { param1: { type: 'string' } } },
   handler: this.customAction.bind(this)
 }
 ```
 
-Then implement the handler method:
+### Adding Static Analyzer Parsers
+
+Create in `src/parser/parsers/`:
+
 ```javascript
-async customAction({ param1 }) {
-  // Implementation
-  return { status: 'success', /* ... */ };
+export function parseNewFormat(data) {
+  return data.findings.map(f => ({
+    id: f.id,
+    type: mapType(f.category),
+    location: { file: f.file, line: f.line },
+    description: f.message,
+    cwe: f.cwe
+  }));
 }
 ```
-
-### Adding Custom Evidence Tools
-
-Add to `executor.js` in the `toolHandlers` object:
-
-```javascript
-async function custom_tool({ arg1, arg2 }) {
-  // Your custom logic
-  return { status: 'success', data: result };
-}
-
-// Add to tool definitions and toolHandlers
-```
-
----
-
-## Rate Limiting & Error Handling
-
-The tool implements **Shannon-style rate limit handling** with multiple layers of protection:
-
-### Rate Limit Detection
-
-```javascript
-// Detects rate limit errors (429, "rate limit", "too many requests")
-isRateLimitError(error)  // → true/false
-isRetryableError(error)  // Also catches 500, 502, 503, network errors
-```
-
-### Retry Strategy
-
-| Error Type | Delay Schedule | Max Delay |
-|------------|----------------|----------|
-| **Rate Limit (429)** | 30s → 40s → 50s | 120 seconds |
-| **Server Error (5xx)** | 10s → 20s → 30s | 60 seconds |
-| **Network/Other** | 2s → 4s → 8s (exponential + jitter) | 30 seconds |
-
-### Staggered Parallel Execution
-
-When running multiple agents in parallel, they start with a 2-second stagger:
-
-```
-Time 0s:  Agent 1 starts
-Time 2s:  Agent 2 starts  
-Time 4s:  Agent 3 starts
-Time 6s:  Agent 4 starts
-Time 8s:  Agent 5 starts
-```
-
-### Usage Example
-
-```javascript
-import { RateLimiter } from './utils/rate-limiter.js';
-
-const limiter = new RateLimiter({ maxRetries: 3 });
-
-// Execute with automatic retry
-const result = await limiter.executeWithRetry(
-  () => apiCall(),
-  'API Request'
-);
-
-// Execute with fallback
-const { result, usedFallback } = await limiter.executeWithFallback(
-  () => apiCall(),
-  () => fallbackData,
-  'API Request'
-);
-
-// Parallel execution with stagger
-const results = await limiter.executeParallelWithStagger([
-  { name: 'Agent 1', fn: async () => { ... } },
-  { name: 'Agent 2', fn: async () => { ... } }
-], { staggerDelay: 2000 });
-```
-
-### Key Files
-
-| File | Purpose |
-|------|--------|
-| `src/utils/error-handling.js` | Error detection & delay calculation |
-| `src/utils/rate-limiter.js` | RateLimiter class with retry logic |
 
 ---
 
@@ -756,31 +399,40 @@ const results = await limiter.executeParallelWithStagger([
 
 ### Common Issues
 
-**1. "No vulnerabilities found in result.json"**
-- Ensure Semgrep output uses `results` or `findings` array
-- Check that findings have valid `check_id` and metadata
+| Issue | Solution |
+|-------|----------|
+| "No vulnerabilities found" | Check Semgrep output uses `results` or `findings` array |
+| "Rate limit exceeded" | Built-in retry with exponential backoff handles this |
+| "Selector timeout" | Use `browser_force_click` or reduce timeout |
+| "Element not found" | Use `browser_wait_for_element` for SPAs |
 
-**2. "Rate limit exceeded"**
-- The tool includes built-in retry logic with exponential backoff (1s, 2s, 4s)
-- Falls back to predefined payloads if rate limits persist
-- Using `gpt-4o-mini` helps avoid rate limits
-- Reduce `maxTurns` in executor.js if issues persist
+### Debug Tips
 
-**3. "Selector timeout"**
-- The target page may be slow or the selector doesn't exist
-- Increase timeout in `browser-server.js`
-- Use `browser_get_response` to find correct selectors
+1. Check evidence files for detailed agent actions
+2. Review `findings_summary.json` for quick overview
+3. Open `report.html` for visual inspection
+4. Use VS Code with SARIF extension to see findings in-editor
 
-**4. "Tool result truncated"**
-- This is expected behavior to avoid token limits
-- Important data should be at the start of responses
+### Rate Limiting
 
-### Debug Mode
+Built-in `RateLimiter` handles API limits automatically:
 
-Add console logging in `executor.js`:
-```javascript
-console.log('Full response:', JSON.stringify(assistantMessage, null, 2));
-```
+| Error Type | Retry Strategy |
+|------------|---------------|
+| Rate Limit (429) | 30s → 40s → 50s (max 120s) |
+| Server Error (5xx) | 10s → 20s → 30s (max 60s) |
+| Network Error | Exponential backoff with jitter |
+
+---
+
+## Supported Analyzers
+
+| Analyzer | File Format | Parser |
+|----------|-------------|--------|
+| Semgrep | JSON | `semgrep-parser.js` |
+| Trivy | JSON | `trivy-parser.js` |
+| CodeQL | SARIF | `codeql-parser.js` |
+| Syft | JSON | `syft-parser.js` |
 
 ---
 
@@ -797,8 +449,8 @@ ISC
 3. Make your changes
 4. Submit a pull request
 
-When adding new features:
-- Follow existing code patterns
-- Update this README
-- Add appropriate prompt templates
-- Test with real static analysis output
+Key areas for contribution:
+- New static analyzer parsers
+- Additional browser tools
+- Improved prompt templates
+- Report format enhancements

@@ -70,48 +70,116 @@ export async function executeExploitationAgent(
     .replace(/{{WEB_URL}}/g, targetUrl)
     .replace(/{{QUEUE_PATH}}/g, queuePath);
   
-  // Add context about available tools and critical instructions
+  // Add universal context (no app-specific content)
   systemPrompt += `
 
 CRITICAL INSTRUCTIONS:
 1. You MUST test EVERY vulnerability in the queue, not just a sample
 2. Do NOT stop early - continue until all vulnerabilities are tested
-3. Use browser_http_request for API endpoints (/rest/*, /api/*, /profile, /search)
-4. If browser_click fails with timeout, use browser_force_click instead
-5. Use browser_scroll to reveal hidden elements before interacting
+3. ALWAYS use static analysis context (file, line, technology) to craft payloads
+4. Use browser_http_request for API endpoints - faster and more reliable
+5. If browser_click fails with timeout, use browser_force_click instead
+6. Save evidence for EACH vulnerability with FULL source mapping
 
-JUICE SHOP ATTACK SURFACES:
-- Login: /#/login with #email and #password fields (SQLi target)
-- Search: /#/search?q=PAYLOAD or /rest/products/search?q=PAYLOAD (SQLi/XSS)
-- User profile: /profile (requires auth, has file upload)
-- REST API: /api/Users, /api/Products, /api/BasketItems
-- Feedback: /#/contact with #comment field (XSS target)
-- File uploads: /file-upload, /profile (XXE, traversal)
-- Redirect: /redirect?to=URL (open redirect)
+ENDPOINT DISCOVERY FROM SOURCE FILES:
+- routes/users.js    → /users, /api/users
+- controllers/auth.js → /auth, /login
+- api/products.js    → /api/products
+- views/search.ejs   → /search
+Use the file path pattern to derive likely endpoints
+
+PAYLOAD CRAFTING:
+- Check technology stack in metadata (express, django, spring, etc.)
+- Use the code snippet to understand injection context
+- Generate 3-5 targeted payloads per vulnerability
 
 TOOL USAGE:
-- browser_get_response: Use FIRST to find valid selectors
-- browser_http_request: PREFERRED for API testing - faster and more reliable than UI
+- read_queue_file: Get ALL vulnerabilities with source context FIRST
+- browser_http_request: PREFERRED for API testing
 - browser_force_click: Use when normal click times out
-- save_evidence: Must save evidence for EACH vulnerability tested`;
+- save_evidence: Include full source mapping (file, line, column)`;
   
   const browserManager = new BrowserManager();
   
-  // Evidence collection tool
-  async function save_evidence({ id, type, evidence, payload, success }) {
+  // Enhanced evidence collection tool with developer-friendly output
+  async function save_evidence(params) {
+    const {
+      id, type, evidence, payload, success,
+      // New source mapping fields
+      sourceFile, sourceLine, sourceColumn, cwe, owasp,
+      endpoint, method, response, exploitationProof, remediation,
+      // Additional context
+      xssType, injectionContext, secretType, vulnerabilityType
+    } = params;
+    
     const evidenceDir = path.join(outputDir, 'evidence');
     await fs.ensureDir(evidenceDir);
+    
     const fileName = `evidence-${id || 'unknown'}-${Date.now()}.json`;
     const filePath = path.join(evidenceDir, fileName);
-    await fs.writeJSON(filePath, { 
-      id, 
-      type, 
-      evidence, 
-      payload, 
-      success, 
-      timestamp: new Date().toISOString() 
-    }, { spaces: 2 });
+    
+    // Create developer-friendly structured output
+    const evidenceData = {
+      // Finding identification
+      findingId: id,
+      timestamp: new Date().toISOString(),
+      
+      // Source code mapping (for developers)
+      sourceLocation: {
+        file: sourceFile || null,
+        line: sourceLine || null,
+        column: sourceColumn || null
+      },
+      
+      // Vulnerability classification
+      vulnerability: {
+        type: vulnerabilityType || type,
+        cwe: cwe || null,
+        owasp: owasp || null,
+        xssType: xssType || null,
+        injectionContext: injectionContext || null,
+        secretType: secretType || null
+      },
+      
+      // Exploitation details
+      exploitation: {
+        endpoint: endpoint || null,
+        method: method || null,
+        payload: payload,
+        response: response || null,
+        success: success,
+        proof: exploitationProof || evidence
+      },
+      
+      // Remediation guidance
+      remediation: remediation || null,
+      
+      // Status classification
+      status: success ? 'CONFIRMED' : 'TESTED_NOT_EXPLOITABLE'
+    };
+    
+    await fs.writeJSON(filePath, evidenceData, { spaces: 2 });
     console.log(chalk.green(`   📝 Evidence saved: ${fileName}`));
+    
+    // Also append to summary file for easy developer review
+    const summaryPath = path.join(outputDir, 'findings_summary.json');
+    let summary = [];
+    try {
+      summary = await fs.readJSON(summaryPath);
+    } catch (e) { /* File doesn't exist yet */ }
+    
+    summary.push({
+      id: id,
+      status: evidenceData.status,
+      file: sourceFile,
+      line: sourceLine,
+      type: vulnerabilityType || type,
+      cwe: cwe,
+      endpoint: endpoint,
+      success: success
+    });
+    await fs.writeJSON(summaryPath, summary, { spaces: 2 });
+    
     return { status: 'success', path: filePath };
   }
 
@@ -144,17 +212,34 @@ TOOL USAGE:
       type: 'function',
       function: {
         name: 'save_evidence',
-        description: 'Save exploitation evidence to a file',
+        description: 'Save exploitation evidence with FULL source code mapping. Include all source location fields for developer output.',
         parameters: {
           type: 'object',
           properties: {
-            id: { type: 'string', description: 'Vulnerability ID' },
-            type: { type: 'string', description: 'Vulnerability type' },
+            id: { type: 'string', description: 'Vulnerability ID from queue' },
+            type: { type: 'string', description: 'Vulnerability type (SQLi, XSS, etc.)' },
             evidence: { type: 'string', description: 'Description of evidence found' },
-            payload: { type: 'string', description: 'The payload used' },
-            success: { type: 'boolean', description: 'Whether the exploit was successful' }
+            payload: { type: 'string', description: 'The exact payload used' },
+            success: { type: 'boolean', description: 'Whether the exploit was successful' },
+            // Source code mapping (for developers)
+            sourceFile: { type: 'string', description: 'Source file path from static analysis' },
+            sourceLine: { type: 'number', description: 'Line number in source file' },
+            sourceColumn: { type: 'number', description: 'Column number in source file' },
+            cwe: { type: 'string', description: 'CWE identifier (e.g., CWE-89)' },
+            owasp: { type: 'string', description: 'OWASP category' },
+            // Exploitation details
+            endpoint: { type: 'string', description: 'The endpoint that was tested' },
+            method: { type: 'string', description: 'HTTP method used (GET, POST, etc.)' },
+            response: { type: 'string', description: 'Key parts of the response' },
+            exploitationProof: { type: 'string', description: 'What proves the exploitation worked' },
+            remediation: { type: 'string', description: 'Suggested fix for the vulnerability' },
+            // Context-specific fields
+            vulnerabilityType: { type: 'string', description: 'Specific vulnerability type' },
+            xssType: { type: 'string', description: 'For XSS: DOM, Reflected, or Stored' },
+            injectionContext: { type: 'string', description: 'Injection context (HTML, Attribute, etc.)' },
+            secretType: { type: 'string', description: 'For secrets: APIKey, Password, Token, etc.' }
           },
-          required: ['id', 'type', 'evidence', 'payload', 'success']
+          required: ['id', 'payload', 'success', 'sourceFile', 'sourceLine']
         }
       }
     },

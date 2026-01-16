@@ -7,6 +7,7 @@ import { generateExploitationQueue } from './queue/queue-generator.js';
 import { executeExploitationAgent } from './agents/executor.js';
 import { path, fs } from 'zx';
 import { getSupportedAnalyzers } from './parser/parser-factory.js';
+import { generateSarifReport, generateHtmlReport, generateDeveloperSummary } from './reporting/report-generator.js';
 
 async function main() {
   console.log(chalk.cyan.bold('\n🔍 Dynamic Security Tester (OpenAI Powered)'));
@@ -150,8 +151,31 @@ async function main() {
       }
     }
     
+    // Generate reports
+    console.log(chalk.blue('\n📋 Generating reports...'));
+    const evidenceDir = path.join(outputDir, 'evidence');
+    
+    try {
+      // Generate developer summary
+      await generateDeveloperSummary(evidenceDir, path.join(outputDir, 'developer_summary.json'));
+      
+      // Generate SARIF report (for IDE integration)
+      await generateSarifReport(evidenceDir, path.join(outputDir, 'report.sarif.json'), { targetUrl });
+      
+      // Generate HTML report (for human review)
+      await generateHtmlReport(evidenceDir, path.join(outputDir, 'report.html'), { targetUrl });
+    } catch (reportError) {
+      console.log(chalk.yellow(`⚠️ Report generation warning: ${reportError.message}`));
+    }
+    
     console.log(chalk.green.bold('\n🎉 Dynamic testing session complete!'));
     console.log(chalk.gray(`Results saved to: ${outputDir}`));
+    console.log(chalk.gray(`\nOutput files:`));
+    console.log(chalk.gray(`  • evidence/           - Individual finding details`));
+    console.log(chalk.gray(`  • findings_summary.json - Quick summary for developers`));
+    console.log(chalk.gray(`  • developer_summary.json - Categorized findings`));
+    console.log(chalk.gray(`  • report.sarif.json   - SARIF for IDE integration`));
+    console.log(chalk.gray(`  • report.html         - Visual HTML report`));
     
   } catch (error) {
     console.error(chalk.red(`\n❌ Error: ${error.message}`));
