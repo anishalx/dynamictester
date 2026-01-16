@@ -2,23 +2,31 @@
 
 import chalk from 'chalk';
 import inquirer from 'inquirer';
-import { parseStaticAnalysisResult } from './parser/result-parser.js';
+import { parseStaticAnalysisResults } from './parser/result-parser.js';
 import { generateExploitationQueue } from './queue/queue-generator.js';
 import { executeExploitationAgent } from './agents/executor.js';
 import { path, fs } from 'zx';
+import { getSupportedAnalyzers } from './parser/parser-factory.js';
 
 async function main() {
   console.log(chalk.cyan.bold('\n🔍 Dynamic Security Tester (OpenAI Powered)'));
+  console.log(chalk.gray('─'.repeat(60)));
+  console.log(chalk.gray(`Supported analyzers: ${getSupportedAnalyzers().join(', ')}`));
   console.log(chalk.gray('─'.repeat(60)));
 
   const answers = await inquirer.prompt([
     {
       type: 'input',
       name: 'resultJsonPath',
-      message: 'Path to static analyzer result.json:',
+      message: 'Path to analyzer result file(s) (comma-separated for multiple):',
       validate: async (input) => {
-        if (await fs.pathExists(input)) return true;
-        return 'File does not exist. Please provide a valid path.';
+        const paths = input.split(',').map(p => p.trim());
+        for (const p of paths) {
+          if (!(await fs.pathExists(p))) {
+            return `File does not exist: ${p}`;
+          }
+        }
+        return true;
       }
     },
     {
@@ -44,9 +52,13 @@ async function main() {
   ]);
 
   const { resultJsonPath, targetUrl, outputDir } = answers;
+  
+  // Parse comma-separated paths
+  const resultPaths = resultJsonPath.split(',').map(p => p.trim());
 
   console.log(chalk.gray(`\nProcessing:`));
-  console.log(chalk.gray(`- Result: ${resultJsonPath}`));
+  console.log(chalk.gray(`- Result files: ${resultPaths.length}`));
+  resultPaths.forEach(p => console.log(chalk.gray(`  • ${p}`)));
   console.log(chalk.gray(`- Target: ${targetUrl}`));
   console.log(chalk.gray(`- Output: ${outputDir}`));
   console.log(chalk.gray('─'.repeat(40)));
@@ -55,12 +67,12 @@ async function main() {
     // Ensure output directory exists
     await fs.ensureDir(outputDir);
 
-    // Step 1: Parse static analysis results
+    // Step 1: Parse static analysis results (supports multiple files)
     console.log(chalk.blue('\n📋 Step 1: Parsing static analysis results...'));
-    const vulnerabilities = await parseStaticAnalysisResult(resultJsonPath);
+    const { vulnerabilities, summary } = await parseStaticAnalysisResults(resultPaths);
     
     if (vulnerabilities.length === 0) {
-      console.log(chalk.yellow('⚠️ No vulnerabilities found in result.json. Exiting.'));
+      console.log(chalk.yellow('⚠️ No vulnerabilities found. Exiting.'));
       process.exit(0);
     }
 
@@ -78,6 +90,11 @@ async function main() {
       ssrf: 'exploit-ssrf.txt',
       secrets: 'exploit-secrets.txt',
       auth: 'exploit-auth.txt',
+      traversal: 'exploit-traversal.txt',
+      xxe: 'exploit-xxe.txt',
+      redirect: 'exploit-redirect.txt',
+      dependency: 'exploit-generic.txt',  // Dependencies typically don't need dynamic testing
+      config: 'exploit-generic.txt',
       other: 'exploit-generic.txt'
     };
 

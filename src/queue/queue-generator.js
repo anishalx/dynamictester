@@ -2,7 +2,8 @@ import { fs, path } from 'zx';
 import chalk from 'chalk';
 
 /**
- * Generate exploitation queue from parsed vulnerabilities
+ * Generate exploitation queue from normalized vulnerabilities
+ * Supports vulnerabilities from multiple analyzers (Semgrep, Gitleaks, Trivy, etc.)
  */
 export async function generateExploitationQueue(vulnerabilities, outputDir) {
   const queues = {
@@ -12,28 +13,42 @@ export async function generateExploitationQueue(vulnerabilities, outputDir) {
     auth: [],
     secrets: [],
     crypto: [],
+    dependency: [],
+    config: [],
     other: []
   };
   
   // Group vulnerabilities by type
   for (const vuln of vulnerabilities) {
-    if (queues[vuln.type]) {
-      queues[vuln.type].push({
-        id: vuln.id,
-        checkId: vuln.checkId,
-        verdict: 'vulnerable',
-        confidence: vuln.confidence,
-        vulnerabilityType: getVulnerabilitySubType(vuln),
-        source: `${vuln.location.file}:${vuln.location.line}`,
-        file: vuln.location.file,
-        line: vuln.location.line,
-        description: vuln.description,
-        cwe: vuln.cwe,
-        owasp: vuln.owasp,
-        witnessPayload: generateWitnessPayload(vuln),
-        shortlink: vuln.shortlink
-      });
+    const queueType = vuln.type || 'other';
+    
+    if (!queues[queueType]) {
+      queues[queueType] = [];
     }
+    
+    queues[queueType].push({
+      id: vuln.id,
+      source: vuln.source, // Track which analyzer found it
+      sourceVersion: vuln.sourceVersion,
+      checkId: vuln.checkId,
+      verdict: 'vulnerable',
+      confidence: vuln.confidence,
+      vulnerabilityType: vuln.subType || queueType,
+      location: `${vuln.location.file}:${vuln.location.line}`,
+      file: vuln.location.file,
+      line: vuln.location.line,
+      column: vuln.location.column,
+      snippet: vuln.location.snippet,
+      description: vuln.description,
+      remediation: vuln.remediation,
+      cwe: vuln.cwe,
+      owasp: vuln.owasp,
+      cvss: vuln.cvss,
+      cve: vuln.cve,
+      witnessPayload: generateWitnessPayload(vuln),
+      reference: vuln.reference,
+      metadata: vuln.metadata
+    });
   }
   
   // Save queues to files
@@ -46,7 +61,18 @@ export async function generateExploitationQueue(vulnerabilities, outputDir) {
     if (queue.length > 0) {
       const queuePath = path.join(deliverablesDir, `${type}_exploitation_queue.json`);
       await fs.writeJSON(queuePath, { vulnerabilities: queue }, { spaces: 2 });
+      
+      // Show breakdown by source analyzer
+      const sourceBreakdown = {};
+      for (const vuln of queue) {
+        sourceBreakdown[vuln.source] = (sourceBreakdown[vuln.source] || 0) + 1;
+      }
+      
       console.log(chalk.green(`✅ Created ${type}_exploitation_queue.json with ${queue.length} vulnerabilities`));
+      for (const [source, count] of Object.entries(sourceBreakdown)) {
+        console.log(chalk.gray(`   - from ${source}: ${count}`));
+      }
+      
       createdQueues[type] = queue;
     }
   }
@@ -54,39 +80,37 @@ export async function generateExploitationQueue(vulnerabilities, outputDir) {
   return createdQueues;
 }
 
-function getVulnerabilitySubType(vuln) {
-  const desc = vuln.description.toLowerCase();
-  const checkId = vuln.checkId?.toLowerCase() || '';
-  
-  if (desc.includes('sql') || checkId.includes('sql')) return 'SQLi';
-  if (desc.includes('command') || checkId.includes('command')) return 'CommandInjection';
-  if (desc.includes('eval') || checkId.includes('eval')) return 'EvalInjection';
-  if (desc.includes('template') || checkId.includes('template')) return 'SSTI';
-  if (desc.includes('reflected')) return 'ReflectedXSS';
-  if (desc.includes('stored')) return 'StoredXSS';
-  if (desc.includes('dom')) return 'DOMXSS';
-  if (desc.includes('innerhtml') || desc.includes('document.write')) return 'DOMXSS';
-  
-  return vuln.type.charAt(0).toUpperCase() + vuln.type.slice(1);
-}
-
+/**
+ * Generate witness payload based on vulnerability type and subtype
+ */
 function generateWitnessPayload(vuln) {
-  const subType = getVulnerabilitySubType(vuln);
+  const subType = vuln.subType || '';
+  const type = vuln.type || '';
   
-  switch (subType) {
-    case 'SQLi':
-      return "' OR '1'='1' --";
-    case 'CommandInjection':
-      return "; whoami";
-    case 'EvalInjection':
-      return "require('child_process').execSync('id')";
-    case 'SSTI':
-      return "{{7*7}}";
-    case 'ReflectedXSS':
-    case 'StoredXSS':
-    case 'DOMXSS':
-      return "<img src=x onerror=alert(1)>";
-    default:
-      return "test_payload";
+  // Injection payloads
+  if (subType === 'SQLi' || type === 'injection' && vuln.description?.toLowerCase().includes('sql')) {
+    return "' OR '1'='1' --";
   }
+  if (subType === 'CommandInjection' || vuln.description?.toLowerCase().includes('command')) {
+    return "; whoami";
+  }
+  if (subType === 'CodeInjection' || subType === 'EvalInjection') {
+    return "require('child_process').execSync('id')";
+  }
+  if (subType === 'SSTI') {
+    return "{{7*7}}";
+  }
+  
+  // XSS payloads
+  if (type === 'xss' || subType.includes('XSS')) {
+    return "<img src=x onerror=alert(1)>";
+  }
+  
+  // SSRF payloads
+  if (type === 'ssrf') {
+    return "http://169.254.169.254/latest/meta-data/";
+  }
+  
+  // Default payload
+  return "test_payload";
 }

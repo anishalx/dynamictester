@@ -1,9 +1,12 @@
 import { chromium } from 'playwright';
 
 const MAX_CONTENT_LENGTH = 15000; // Max chars to return to avoid token limits
+const DEFAULT_TIMEOUT = 5000; // 5 seconds default timeout (reduced from 8s)
+const SHORT_TIMEOUT = 2000; // 2 seconds for quick checks
 
 /**
  * Browser automation tools for the LLM
+ * Enhanced with better error handling and element visibility checks
  */
 export class BrowserManager {
   constructor() {
@@ -15,29 +18,153 @@ export class BrowserManager {
   async ensureBrowser() {
     if (!this.browser) {
       this.browser = await chromium.launch({ headless: true });
-      this.context = await this.browser.newContext();
+      this.context = await this.browser.newContext({
+        viewport: { width: 1280, height: 720 },
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      });
       this.page = await this.context.newPage();
+    }
+  }
+
+  /**
+   * Check if a selector points to a visible, enabled element
+   */
+  async isElementInteractable(selector) {
+    try {
+      const element = await this.page.$(selector);
+      if (!element) return { interactable: false, reason: 'Element not found' };
+      
+      const isVisible = await element.isVisible();
+      const isEnabled = await element.isEnabled();
+      
+      if (!isVisible) return { interactable: false, reason: 'Element is hidden' };
+      if (!isEnabled) return { interactable: false, reason: 'Element is disabled' };
+      
+      return { interactable: true };
+    } catch (e) {
+      return { interactable: false, reason: e.message };
+    }
+  }
+
+  /**
+   * Find an alternative selector if the primary one doesn't work
+   */
+  async findAlternativeSelector(originalSelector, elementType = 'input') {
+    try {
+      // Try common alternative selectors
+      const alternatives = await this.page.evaluate((type) => {
+        const elements = document.querySelectorAll(type);
+        const interactable = [];
+        
+        for (const el of elements) {
+          // Check if visible and enabled
+          const style = window.getComputedStyle(el);
+          const isVisible = style.display !== 'none' && 
+                           style.visibility !== 'hidden' && 
+                           el.offsetParent !== null;
+          const isEnabled = !el.disabled;
+          
+          if (isVisible && isEnabled) {
+            let selector = null;
+            if (el.id) selector = `#${el.id}`;
+            else if (el.name) selector = `[name="${el.name}"]`;
+            else if (el.placeholder) selector = `[placeholder="${el.placeholder}"]`;
+            else if (el.type && el.className) selector = `${type}[type="${el.type}"].${el.className.split(' ')[0]}`;
+            
+            if (selector) {
+              interactable.push({
+                selector,
+                type: el.type || 'text',
+                placeholder: el.placeholder,
+                name: el.name,
+                id: el.id
+              });
+            }
+          }
+        }
+        return interactable;
+      }, elementType);
+      
+      return alternatives;
+    } catch {
+      return [];
     }
   }
 
   async navigate({ url }) {
     await this.ensureBrowser();
-    await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    return { status: 'success', url, title: await this.page.title() };
+    try {
+      await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      // Wait a bit for SPA content to render
+      await this.page.waitForTimeout(1000);
+      return { status: 'success', url, title: await this.page.title() };
+    } catch (e) {
+      return { status: 'error', message: e.message, url };
+    }
   }
 
   async fill({ selector, value }) {
     if (!this.page) throw new Error('No page open');
-    await this.page.waitForSelector(selector, { timeout: 10000 });
-    await this.page.fill(selector, value);
-    return { status: 'success', selector, value };
+    
+    // First check if element is interactable
+    const check = await this.isElementInteractable(selector);
+    if (!check.interactable) {
+      // Try to find alternatives
+      const alternatives = await this.findAlternativeSelector(selector, 'input, textarea');
+      if (alternatives.length > 0) {
+        return {
+          status: 'error',
+          message: `Selector "${selector}" - ${check.reason}. Try these instead:`,
+          alternatives: alternatives.slice(0, 5)
+        };
+      }
+      return { 
+        status: 'error', 
+        message: `Selector "${selector}" - ${check.reason}. No alternative selectors found.`,
+        suggestion: 'Use browser_get_response to find valid selectors'
+      };
+    }
+
+    try {
+      await this.page.waitForSelector(selector, { state: 'visible', timeout: DEFAULT_TIMEOUT });
+      await this.page.fill(selector, value);
+      return { status: 'success', selector, value };
+    } catch (e) {
+      return { status: 'error', message: e.message.split('\n')[0], selector };
+    }
   }
 
   async click({ selector }) {
     if (!this.page) throw new Error('No page open');
-    await this.page.waitForSelector(selector, { timeout: 10000 });
-    await this.page.click(selector);
-    return { status: 'success', selector };
+    
+    // First check if element is interactable
+    const check = await this.isElementInteractable(selector);
+    if (!check.interactable) {
+      // Try common button selectors
+      const buttonAlternatives = await this.findAlternativeSelector(selector, 'button, [type="submit"], a');
+      if (buttonAlternatives.length > 0) {
+        return {
+          status: 'error',
+          message: `Selector "${selector}" - ${check.reason}. Try these instead:`,
+          alternatives: buttonAlternatives.slice(0, 5)
+        };
+      }
+      return { 
+        status: 'error', 
+        message: `Selector "${selector}" - ${check.reason}`,
+        suggestion: 'Use browser_get_response to find clickable elements'
+      };
+    }
+
+    try {
+      await this.page.waitForSelector(selector, { state: 'visible', timeout: DEFAULT_TIMEOUT });
+      await this.page.click(selector);
+      // Wait for any navigation or updates
+      await this.page.waitForTimeout(500);
+      return { status: 'success', selector };
+    } catch (e) {
+      return { status: 'error', message: e.message.split('\n')[0], selector };
+    }
   }
 
   /**
@@ -63,10 +190,12 @@ export class BrowserManager {
     } else {
       // Extract only relevant parts for security testing
       result.forms = await this.extractForms();
-      result.inputs = await this.extractInputs();
+      result.inputs = await this.extractInteractableInputs();
+      result.buttons = await this.extractButtons();
       result.links = await this.extractLinks();
       result.scripts = await this.extractScriptSources();
       result.text = await this.extractVisibleText();
+      result.errors = await this.extractErrorMessages();
     }
 
     return result;
@@ -80,28 +209,77 @@ export class BrowserManager {
           action: form.action,
           method: form.method,
           id: form.id,
-          inputs: Array.from(form.querySelectorAll('input, textarea, select')).slice(0, 20).map(input => ({
-            name: input.name,
-            type: input.type,
-            id: input.id,
-            placeholder: input.placeholder
-          }))
+          inputs: Array.from(form.querySelectorAll('input:not([type="hidden"]), textarea, select'))
+            .filter(input => {
+              const style = window.getComputedStyle(input);
+              return style.display !== 'none' && !input.disabled;
+            })
+            .slice(0, 20)
+            .map(input => ({
+              name: input.name,
+              type: input.type,
+              id: input.id,
+              placeholder: input.placeholder,
+              selector: input.id ? `#${input.id}` : (input.name ? `[name="${input.name}"]` : null)
+            }))
         }));
       });
     } catch { return []; }
   }
 
-  async extractInputs() {
+  /**
+   * Extract only visible, enabled inputs
+   */
+  async extractInteractableInputs() {
     try {
       return await this.page.evaluate(() => {
         const inputs = Array.from(document.querySelectorAll('input, textarea, select'));
-        return inputs.slice(0, 30).map(input => ({
-          name: input.name,
-          type: input.type,
-          id: input.id,
-          placeholder: input.placeholder,
-          selector: input.id ? `#${input.id}` : (input.name ? `[name="${input.name}"]` : null)
-        })).filter(i => i.selector);
+        return inputs
+          .filter(input => {
+            const style = window.getComputedStyle(input);
+            const isVisible = style.display !== 'none' && 
+                             style.visibility !== 'hidden' && 
+                             input.offsetParent !== null &&
+                             input.type !== 'hidden';
+            const isEnabled = !input.disabled;
+            return isVisible && isEnabled;
+          })
+          .slice(0, 30)
+          .map(input => ({
+            name: input.name || null,
+            type: input.type || 'text',
+            id: input.id || null,
+            placeholder: input.placeholder || null,
+            selector: input.id ? `#${input.id}` : (input.name ? `[name="${input.name}"]` : null),
+            value: input.value ? '(has value)' : '(empty)'
+          }))
+          .filter(i => i.selector);
+      });
+    } catch { return []; }
+  }
+
+  /**
+   * Extract clickable buttons
+   */
+  async extractButtons() {
+    try {
+      return await this.page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button, [type="submit"], [role="button"]'));
+        return buttons
+          .filter(btn => {
+            const style = window.getComputedStyle(btn);
+            return style.display !== 'none' && !btn.disabled;
+          })
+          .slice(0, 15)
+          .map(btn => ({
+            text: btn.textContent?.trim().slice(0, 50) || '',
+            type: btn.type || 'button',
+            id: btn.id || null,
+            selector: btn.id ? `#${btn.id}` : 
+                      btn.type === 'submit' ? '[type="submit"]' :
+                      btn.className ? `button.${btn.className.split(' ')[0]}` : null
+          }))
+          .filter(b => b.selector);
       });
     } catch { return []; }
   }
@@ -137,15 +315,53 @@ export class BrowserManager {
   }
 
   /**
+   * Extract error messages (useful for detecting successful injections)
+   */
+  async extractErrorMessages() {
+    try {
+      return await this.page.evaluate(() => {
+        // Look for common error message patterns
+        const errorSelectors = [
+          '.error', '.alert-error', '.alert-danger', '[role="alert"]',
+          '.message-error', '.error-message', '.validation-error',
+          '.mat-error', '.ng-invalid', '.has-error'
+        ];
+        
+        const errors = [];
+        for (const selector of errorSelectors) {
+          const elements = document.querySelectorAll(selector);
+          for (const el of elements) {
+            const text = el.textContent?.trim();
+            if (text && text.length > 0 && text.length < 500) {
+              errors.push(text);
+            }
+          }
+        }
+        return errors.slice(0, 10);
+      });
+    } catch { return []; }
+  }
+
+  /**
    * Type text and press Enter (useful for search boxes)
    */
   async typeAndSubmit({ selector, value }) {
     if (!this.page) throw new Error('No page open');
-    await this.page.waitForSelector(selector, { timeout: 10000 });
-    await this.page.fill(selector, value);
-    await this.page.press(selector, 'Enter');
-    await this.page.waitForLoadState('domcontentloaded');
-    return { status: 'success', selector, value };
+    
+    const check = await this.isElementInteractable(selector);
+    if (!check.interactable) {
+      return { status: 'error', message: check.reason, selector };
+    }
+
+    try {
+      await this.page.waitForSelector(selector, { state: 'visible', timeout: DEFAULT_TIMEOUT });
+      await this.page.fill(selector, value);
+      await this.page.press(selector, 'Enter');
+      await this.page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
+      return { status: 'success', selector, value };
+    } catch (e) {
+      return { status: 'error', message: e.message.split('\n')[0], selector };
+    }
   }
 
   /**
@@ -158,6 +374,172 @@ export class BrowserManager {
       return { status: 'success', url: this.page.url() };
     } catch {
       return { status: 'timeout', url: this.page.url() };
+    }
+  }
+
+  /**
+   * Take a screenshot for evidence
+   */
+  async screenshot({ path, fullPage = false }) {
+    if (!this.page) throw new Error('No page open');
+    try {
+      const buffer = await this.page.screenshot({ path, fullPage });
+      return { status: 'success', path, size: buffer.length };
+    } catch (e) {
+      return { status: 'error', message: e.message };
+    }
+  }
+
+  /**
+   * Force click an element using JavaScript (bypasses visibility checks)
+   */
+  async forceClick({ selector }) {
+    if (!this.page) throw new Error('No page open');
+    try {
+      const result = await this.page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return { success: false, error: 'Element not found' };
+        el.click();
+        return { success: true };
+      }, selector);
+      
+      if (!result.success) {
+        return { status: 'error', message: result.error, selector };
+      }
+      await this.page.waitForTimeout(500);
+      return { status: 'success', selector, method: 'force_click' };
+    } catch (e) {
+      return { status: 'error', message: e.message, selector };
+    }
+  }
+
+  /**
+   * Scroll the page to reveal hidden elements
+   */
+  async scroll({ direction = 'down', amount = 500 }) {
+    if (!this.page) throw new Error('No page open');
+    try {
+      await this.page.evaluate((dir, amt) => {
+        if (dir === 'down') window.scrollBy(0, amt);
+        else if (dir === 'up') window.scrollBy(0, -amt);
+        else if (dir === 'top') window.scrollTo(0, 0);
+        else if (dir === 'bottom') window.scrollTo(0, document.body.scrollHeight);
+      }, direction, amount);
+      await this.page.waitForTimeout(300);
+      return { status: 'success', direction, amount };
+    } catch (e) {
+      return { status: 'error', message: e.message };
+    }
+  }
+
+  /**
+   * Wait for an element to appear (useful for SPAs)
+   */
+  async waitForElement({ selector, timeout = 5000, state = 'visible' }) {
+    if (!this.page) throw new Error('No page open');
+    try {
+      await this.page.waitForSelector(selector, { state, timeout });
+      return { status: 'success', selector, found: true };
+    } catch (e) {
+      return { status: 'timeout', selector, found: false, message: `Element not found within ${timeout}ms` };
+    }
+  }
+
+  /**
+   * Make a direct HTTP request (bypasses browser UI)
+   * Essential for API testing
+   */
+  async httpRequest({ url, method = 'GET', headers = {}, body = null, contentType = 'application/json' }) {
+    await this.ensureBrowser();
+    try {
+      const requestOptions = {
+        method,
+        headers: {
+          'Content-Type': contentType,
+          ...headers
+        }
+      };
+      
+      if (body && method !== 'GET') {
+        requestOptions.data = typeof body === 'string' ? body : JSON.stringify(body);
+      }
+
+      // Use page.evaluate to make fetch request with same cookies
+      const result = await this.page.evaluate(async (opts) => {
+        try {
+          const fetchOptions = {
+            method: opts.method,
+            headers: opts.headers,
+            credentials: 'include'
+          };
+          
+          if (opts.data) {
+            fetchOptions.body = opts.data;
+          }
+          
+          const response = await fetch(opts.url, fetchOptions);
+          const text = await response.text();
+          
+          let json = null;
+          try {
+            json = JSON.parse(text);
+          } catch (e) {
+            // Not JSON
+          }
+          
+          return {
+            status: response.status,
+            statusText: response.statusText,
+            headers: Object.fromEntries(response.headers.entries()),
+            body: text.slice(0, 5000),
+            json: json,
+            success: response.ok
+          };
+        } catch (e) {
+          return { error: e.message };
+        }
+      }, { url, method, headers: requestOptions.headers, data: requestOptions.data });
+      
+      if (result.error) {
+        return { status: 'error', message: result.error, url };
+      }
+      
+      return {
+        status: 'success',
+        url,
+        method,
+        httpStatus: result.status,
+        statusText: result.statusText,
+        body: result.body,
+        json: result.json,
+        responseSuccess: result.success
+      };
+    } catch (e) {
+      return { status: 'error', message: e.message, url };
+    }
+  }
+
+  /**
+   * Execute JavaScript in the page context
+   */
+  async executeScript({ script }) {
+    if (!this.page) throw new Error('No page open');
+    try {
+      const result = await this.page.evaluate((code) => {
+        try {
+          return { success: true, result: eval(code) };
+        } catch (e) {
+          return { success: false, error: e.message };
+        }
+      }, script);
+      
+      return {
+        status: result.success ? 'success' : 'error',
+        result: result.result,
+        error: result.error
+      };
+    } catch (e) {
+      return { status: 'error', message: e.message };
     }
   }
 
@@ -175,7 +557,7 @@ export class BrowserManager {
     return [
       {
         name: 'browser_navigate',
-        description: 'Navigate to a URL',
+        description: 'Navigate to a URL. Waits for page to load.',
         parameters: {
           type: 'object',
           properties: {
@@ -187,11 +569,11 @@ export class BrowserManager {
       },
       {
         name: 'browser_fill',
-        description: 'Fill a form field with a value',
+        description: 'Fill a form field. Returns alternatives if selector is hidden/disabled. Use browser_get_response first to find valid selectors.',
         parameters: {
           type: 'object',
           properties: {
-            selector: { type: 'string', description: 'CSS selector for the input field' },
+            selector: { type: 'string', description: 'CSS selector for the input field (e.g., #email, [name="username"])' },
             value: { type: 'string', description: 'Value to fill' }
           },
           required: ['selector', 'value']
@@ -200,7 +582,7 @@ export class BrowserManager {
       },
       {
         name: 'browser_click',
-        description: 'Click an element',
+        description: 'Click an element. Returns alternatives if selector is hidden/disabled.',
         parameters: {
           type: 'object',
           properties: {
@@ -225,18 +607,31 @@ export class BrowserManager {
       },
       {
         name: 'browser_get_response',
-        description: 'Get page information. Returns forms, inputs, links, and visible text by default. Use extract="full" for truncated HTML.',
+        description: 'Get page info with ONLY visible/interactable elements. Returns forms, inputs (visible only), buttons, links, errors. Use this FIRST before trying to interact.',
         parameters: {
           type: 'object',
           properties: {
             extract: { 
               type: 'string', 
               enum: ['summary', 'full'],
-              description: 'What to extract: "summary" (default, returns forms/inputs/links) or "full" (truncated HTML)'
+              description: 'What to extract: "summary" (default, returns visible forms/inputs/buttons) or "full" (truncated HTML)'
             }
           }
         },
         handler: this.getResponse.bind(this)
+      },
+      {
+        name: 'browser_screenshot',
+        description: 'Take a screenshot for evidence',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'Path to save screenshot' },
+            fullPage: { type: 'boolean', description: 'Capture full page (default: false)' }
+          },
+          required: ['path']
+        },
+        handler: this.screenshot.bind(this)
       },
       {
         name: 'browser_close',
@@ -246,6 +641,72 @@ export class BrowserManager {
           properties: {}
         },
         handler: this.close.bind(this)
+      },
+      {
+        name: 'browser_force_click',
+        description: 'Force click an element using JavaScript. Use when browser_click fails due to overlays or hidden elements.',
+        parameters: {
+          type: 'object',
+          properties: {
+            selector: { type: 'string', description: 'CSS selector for the element to click' }
+          },
+          required: ['selector']
+        },
+        handler: this.forceClick.bind(this)
+      },
+      {
+        name: 'browser_scroll',
+        description: 'Scroll the page to reveal hidden elements',
+        parameters: {
+          type: 'object',
+          properties: {
+            direction: { type: 'string', enum: ['up', 'down', 'top', 'bottom'], description: 'Scroll direction' },
+            amount: { type: 'number', description: 'Pixels to scroll (default: 500)' }
+          }
+        },
+        handler: this.scroll.bind(this)
+      },
+      {
+        name: 'browser_wait_for_element',
+        description: 'Wait for an element to appear on page (useful for SPA content loading)',
+        parameters: {
+          type: 'object',
+          properties: {
+            selector: { type: 'string', description: 'CSS selector to wait for' },
+            timeout: { type: 'number', description: 'Max time to wait in ms (default: 5000)' },
+            state: { type: 'string', enum: ['visible', 'attached', 'hidden'], description: 'Element state to wait for' }
+          },
+          required: ['selector']
+        },
+        handler: this.waitForElement.bind(this)
+      },
+      {
+        name: 'browser_http_request',
+        description: 'Make a direct HTTP request to an API endpoint. CRITICAL for testing injection in REST APIs without browser UI. Use for /rest/*, /api/* endpoints.',
+        parameters: {
+          type: 'object',
+          properties: {
+            url: { type: 'string', description: 'Full URL to request' },
+            method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], description: 'HTTP method' },
+            headers: { type: 'object', description: 'Additional headers' },
+            body: { type: 'string', description: 'Request body (for POST/PUT/PATCH)' },
+            contentType: { type: 'string', description: 'Content-Type header (default: application/json)' }
+          },
+          required: ['url']
+        },
+        handler: this.httpRequest.bind(this)
+      },
+      {
+        name: 'browser_execute_script',
+        description: 'Execute JavaScript in page context. Use for DOM-based XSS detection or complex interactions.',
+        parameters: {
+          type: 'object',
+          properties: {
+            script: { type: 'string', description: 'JavaScript code to execute' }
+          },
+          required: ['script']
+        },
+        handler: this.executeScript.bind(this)
       }
     ];
   }

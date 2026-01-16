@@ -2,6 +2,14 @@ import OpenAI from 'openai';
 import { fs, path } from 'zx';
 import chalk from 'chalk';
 import { BrowserManager } from '../mcp/browser-server.js';
+import { 
+  RateLimiter, 
+  isRetryableError, 
+  isRateLimitError, 
+  getRetryDelay, 
+  formatDelay,
+  sleep 
+} from '../utils/rate-limiter.js';
 
 const openai = new OpenAI();
 
@@ -38,9 +46,12 @@ export async function executeExploitationAgent(
   outputDir,
   options = {}
 ) {
-  const model = options.model || 'gpt-4o-mini'; // Use mini by default to avoid rate limits
+  const model = options.model || 'gpt-4o';
+  const maxRetries = options.maxRetries || 3;
+  const rateLimiter = new RateLimiter({ maxRetries, enableLogging: true });
   
   console.log(chalk.cyan(`🚀 Starting OpenAI exploitation agent (${model})...`));
+  console.log(chalk.gray(`   Rate limit handling: ${maxRetries} retries with exponential backoff`));
   
   // Load prompt template
   let systemPrompt = await fs.readFile(promptTemplate, 'utf8');
@@ -59,8 +70,30 @@ export async function executeExploitationAgent(
     .replace(/{{WEB_URL}}/g, targetUrl)
     .replace(/{{QUEUE_PATH}}/g, queuePath);
   
-  // Add context about available tools
-  systemPrompt += `\n\nIMPORTANT: When using browser_get_response, it returns a summary with forms, inputs, and links. Use this to find the right selectors for testing.`;
+  // Add context about available tools and critical instructions
+  systemPrompt += `
+
+CRITICAL INSTRUCTIONS:
+1. You MUST test EVERY vulnerability in the queue, not just a sample
+2. Do NOT stop early - continue until all vulnerabilities are tested
+3. Use browser_http_request for API endpoints (/rest/*, /api/*, /profile, /search)
+4. If browser_click fails with timeout, use browser_force_click instead
+5. Use browser_scroll to reveal hidden elements before interacting
+
+JUICE SHOP ATTACK SURFACES:
+- Login: /#/login with #email and #password fields (SQLi target)
+- Search: /#/search?q=PAYLOAD or /rest/products/search?q=PAYLOAD (SQLi/XSS)
+- User profile: /profile (requires auth, has file upload)
+- REST API: /api/Users, /api/Products, /api/BasketItems
+- Feedback: /#/contact with #comment field (XSS target)
+- File uploads: /file-upload, /profile (XXE, traversal)
+- Redirect: /redirect?to=URL (open redirect)
+
+TOOL USAGE:
+- browser_get_response: Use FIRST to find valid selectors
+- browser_http_request: PREFERRED for API testing - faster and more reliable than UI
+- browser_force_click: Use when normal click times out
+- save_evidence: Must save evidence for EACH vulnerability tested`;
   
   const browserManager = new BrowserManager();
   
@@ -82,15 +115,14 @@ export async function executeExploitationAgent(
     return { status: 'success', path: filePath };
   }
 
-  // Read queue file tool
+  // Read queue file tool - returns ALL vulnerabilities (no limit)
   async function read_queue_file({ filePath }) {
     try {
       const data = await fs.readJSON(filePath || queuePath);
-      // Limit to first 5 vulnerabilities to reduce tokens
-      if (data.vulnerabilities && data.vulnerabilities.length > 5) {
-        data.vulnerabilities = data.vulnerabilities.slice(0, 5);
-        data.note = 'Showing first 5 vulnerabilities only';
-      }
+      // Return all vulnerabilities with summary stats
+      const count = data.vulnerabilities?.length || 0;
+      data.totalCount = count;
+      data.note = `Loaded ${count} vulnerabilities. You MUST test ALL of them.`;
       return { status: 'success', data };
     } catch (e) {
       return { status: 'error', message: e.message };
@@ -130,7 +162,7 @@ export async function executeExploitationAgent(
       type: 'function',
       function: {
         name: 'read_queue_file',
-        description: 'Read the vulnerability queue JSON file (returns first 5 vulnerabilities)',
+        description: 'Read the vulnerability queue JSON file. Returns ALL vulnerabilities. You MUST test every single vulnerability.',
         parameters: {
           type: 'object',
           properties: {
@@ -162,20 +194,50 @@ export async function executeExploitationAgent(
   ];
 
   let turnCount = 0;
-  const maxTurns = 30;
+  const maxTurns = 50; // Increased from 30 to allow thorough testing
+  let consecutiveErrors = 0;
+  const maxConsecutiveErrors = 5;
 
   try {
     while (turnCount < maxTurns) {
       turnCount++;
       console.log(chalk.blue(`\n🤖 Turn ${turnCount}:`));
 
-      const response = await openai.chat.completions.create({
-        model: model,
-        messages: messages,
-        tools: tools,
-        tool_choice: 'auto',
-        max_tokens: 1000, // Limit response size
-      });
+      // Use rate limiter for API call with retry logic
+      let response;
+      try {
+        response = await rateLimiter.executeWithRetry(
+          async () => {
+            return await openai.chat.completions.create({
+              model: model,
+              messages: messages,
+              tools: tools,
+              tool_choice: 'auto',
+              max_tokens: 1000,
+            });
+          },
+          `OpenAI API request (turn ${turnCount})`,
+          { maxRetries }
+        );
+        consecutiveErrors = 0; // Reset on success
+      } catch (apiError) {
+        consecutiveErrors++;
+        console.log(chalk.red(`   ❌ API call failed: ${apiError.message}`));
+        
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          console.log(chalk.red(`\n   ❌ Too many consecutive errors (${maxConsecutiveErrors}), stopping agent`));
+          break;
+        }
+        
+        // If rate limit, add extra cooldown
+        if (isRateLimitError(apiError)) {
+          const cooldown = 60000; // 1 minute cooldown
+          console.log(chalk.yellow(`   ⏳ Rate limit cooldown: waiting ${formatDelay(cooldown)}...`));
+          await sleep(cooldown);
+        }
+        
+        continue; // Try next turn
+      }
 
       const assistantMessage = response.choices[0].message;
       messages.push(assistantMessage);
@@ -247,9 +309,21 @@ export async function executeExploitationAgent(
 
     await browserManager.close();
     
+    // Log error stats if any
+    const errorStats = rateLimiter.getErrorStats();
+    if (errorStats.total > 0) {
+      console.log(chalk.gray(`\n📊 Error statistics:`));
+      console.log(chalk.gray(`   Total errors: ${errorStats.total}`));
+      console.log(chalk.gray(`   Rate limit errors: ${errorStats.rateLimitErrors}`));
+      if (Object.keys(errorStats.byType).length > 0) {
+        console.log(chalk.gray(`   By type: ${JSON.stringify(errorStats.byType)}`));
+      }
+    }
+    
     return {
       success: true,
-      turns: turnCount
+      turns: turnCount,
+      errorStats
     };
     
   } catch (error) {
@@ -257,7 +331,60 @@ export async function executeExploitationAgent(
     await browserManager.close();
     return {
       success: false,
-      error: error.message
+      error: error.message,
+      errorStats: rateLimiter.getErrorStats()
     };
   }
+}
+
+/**
+ * Execute multiple agents in parallel with staggered starts
+ * Prevents API overwhelm and handles rate limits gracefully
+ * 
+ * @param {Array<{promptTemplate: string, queuePath: string, targetUrl: string, outputDir: string, name: string}>} agents
+ * @param {object} options - Execution options
+ * @returns {Promise<object>} Results summary
+ */
+export async function executeAgentsInParallel(agents, options = {}) {
+  const staggerDelay = options.staggerDelay || 2000; // 2 seconds between agent starts
+  const maxRetries = options.maxRetries || 3;
+  const rateLimiter = new RateLimiter({ 
+    maxRetries, 
+    staggerDelay,
+    enableLogging: true 
+  });
+
+  console.log(chalk.cyan(`\n🚀 Starting ${agents.length} agents in parallel with ${staggerDelay}ms stagger...`));
+  console.log(chalk.gray(`   Timeline:`));
+  agents.forEach((agent, i) => {
+    console.log(chalk.gray(`   - ${agent.name}: starts after ${formatDelay(i * staggerDelay)}`));
+  });
+
+  const tasks = agents.map(agent => ({
+    name: agent.name,
+    fn: async () => {
+      return await executeExploitationAgent(
+        agent.promptTemplate,
+        agent.queuePath,
+        agent.targetUrl,
+        agent.outputDir,
+        { ...options, model: agent.model || options.model }
+      );
+    }
+  }));
+
+  const results = await rateLimiter.executeParallelWithStagger(tasks, {
+    staggerDelay,
+    maxAttempts: maxRetries
+  });
+
+  // Summary
+  console.log(chalk.cyan(`\n📊 Parallel execution summary:`));
+  console.log(chalk.gray(`   Total: ${results.total}`));
+  console.log(chalk.green(`   Succeeded: ${results.succeeded}`));
+  if (results.failed > 0) {
+    console.log(chalk.red(`   Failed: ${results.failed}`));
+  }
+
+  return results;
 }

@@ -1,0 +1,8 @@
+{
+  "id": "javascript.express.security.audit.express-detect-notevil-usage.express-detect-notevil-usage",
+  "type": "CodeInjection",
+  "evidence": "Attempted a command injection via email input using payload '; ls'. Execution did not seem successful as generic error 'Invalid email or password.' was returned.",
+  "payload": "; ls",
+  "success": false,
+  "timestamp": "2026-01-15T18:07:03.720Z"
+}

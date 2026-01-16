@@ -141,15 +141,22 @@ The parser reads a Semgrep JSON result file and extracts vulnerability informati
 
 The parser maps Semgrep findings to internal vulnerability types:
 
-| Vulnerability Class | Internal Type |
-|---------------------|---------------|
-| SQL Injection, Command Injection, Code Injection | `injection` |
-| Cross-Site Scripting (XSS) | `xss` |
-| Server-Side Request Forgery | `ssrf` |
-| Hardcoded Secrets, Credentials | `secrets` |
-| Cryptographic Issues | `crypto` |
-| Authentication Issues | `auth` |
-| Everything else | `other` |
+| Vulnerability Class | Internal Type | OWASP 2021 |
+|---------------------|---------------|------------|
+| SQL Injection, Command Injection, Code Injection, LDAP, XPath | `injection` | A03:2021 |
+| Cross-Site Scripting (XSS) | `xss` | A03:2021 |
+| Server-Side Request Forgery | `ssrf` | A10:2021 |
+| XML External Entity (XXE) | `xxe` | A05:2021 |
+| Cross-Site Request Forgery | `csrf` | A01:2021 |
+| Insecure Deserialization | `deserialization` | A08:2021 |
+| Open Redirect | `redirect` | A01:2021 |
+| Hardcoded Secrets, Credentials | `secrets` | A02:2021 |
+| Cryptographic Issues | `crypto` | A02:2021 |
+| Authentication Issues | `auth` | A07:2021 |
+| Path Traversal | `traversal` | A01:2021 |
+| File Upload | `upload` | A04:2021 |
+| IDOR / Broken Access Control | `access` | A01:2021 |
+| Everything else | `other` | - |
 
 ### Step 2: Generate Exploitation Queues (`queue-generator.js`)
 
@@ -185,6 +192,8 @@ Groups vulnerabilities by type and creates JSON queue files:
 | Eval Injection | `require('child_process').execSync('id')` |
 | SSTI | `{{7*7}}` |
 | XSS (all types) | `<img src=x onerror=alert(1)>` |
+| XXE | `<?xml ...<!ENTITY xxe SYSTEM "file:///etc/passwd">]>` |
+| Deserialization | `O:8:"stdClass":0:{}` |
 
 ### Step 3: Execute AI Agent (`executor.js`)
 
@@ -295,12 +304,19 @@ export async function generateExploitationQueue(vulnerabilities, outputDir)
 ```
 
 **Queue Categories**:
-- `injection` - SQL, Command, Code injection
-- `xss` - Cross-Site Scripting
+- `injection` - SQL, Command, Code, LDAP, XPath injection
+- `xss` - Cross-Site Scripting (Reflected, Stored, DOM)
 - `ssrf` - Server-Side Request Forgery
+- `xxe` - XML External Entity
+- `csrf` - Cross-Site Request Forgery
+- `deserialization` - Insecure Deserialization
+- `redirect` - Open Redirect
 - `auth` - Authentication issues
 - `secrets` - Hardcoded credentials
 - `crypto` - Cryptographic issues
+- `traversal` - Path Traversal
+- `upload` - File Upload
+- `access` - IDOR / Broken Access Control
 - `other` - Everything else
 
 **Helper Functions**:
@@ -668,6 +684,74 @@ async function custom_tool({ arg1, arg2 }) {
 
 ---
 
+## Rate Limiting & Error Handling
+
+The tool implements **Shannon-style rate limit handling** with multiple layers of protection:
+
+### Rate Limit Detection
+
+```javascript
+// Detects rate limit errors (429, "rate limit", "too many requests")
+isRateLimitError(error)  // → true/false
+isRetryableError(error)  // Also catches 500, 502, 503, network errors
+```
+
+### Retry Strategy
+
+| Error Type | Delay Schedule | Max Delay |
+|------------|----------------|----------|
+| **Rate Limit (429)** | 30s → 40s → 50s | 120 seconds |
+| **Server Error (5xx)** | 10s → 20s → 30s | 60 seconds |
+| **Network/Other** | 2s → 4s → 8s (exponential + jitter) | 30 seconds |
+
+### Staggered Parallel Execution
+
+When running multiple agents in parallel, they start with a 2-second stagger:
+
+```
+Time 0s:  Agent 1 starts
+Time 2s:  Agent 2 starts  
+Time 4s:  Agent 3 starts
+Time 6s:  Agent 4 starts
+Time 8s:  Agent 5 starts
+```
+
+### Usage Example
+
+```javascript
+import { RateLimiter } from './utils/rate-limiter.js';
+
+const limiter = new RateLimiter({ maxRetries: 3 });
+
+// Execute with automatic retry
+const result = await limiter.executeWithRetry(
+  () => apiCall(),
+  'API Request'
+);
+
+// Execute with fallback
+const { result, usedFallback } = await limiter.executeWithFallback(
+  () => apiCall(),
+  () => fallbackData,
+  'API Request'
+);
+
+// Parallel execution with stagger
+const results = await limiter.executeParallelWithStagger([
+  { name: 'Agent 1', fn: async () => { ... } },
+  { name: 'Agent 2', fn: async () => { ... } }
+], { staggerDelay: 2000 });
+```
+
+### Key Files
+
+| File | Purpose |
+|------|--------|
+| `src/utils/error-handling.js` | Error detection & delay calculation |
+| `src/utils/rate-limiter.js` | RateLimiter class with retry logic |
+
+---
+
 ## Troubleshooting
 
 ### Common Issues
@@ -677,8 +761,10 @@ async function custom_tool({ arg1, arg2 }) {
 - Check that findings have valid `check_id` and metadata
 
 **2. "Rate limit exceeded"**
+- The tool includes built-in retry logic with exponential backoff (1s, 2s, 4s)
+- Falls back to predefined payloads if rate limits persist
 - Using `gpt-4o-mini` helps avoid rate limits
-- Reduce `maxTurns` in executor.js
+- Reduce `maxTurns` in executor.js if issues persist
 
 **3. "Selector timeout"**
 - The target page may be slow or the selector doesn't exist

@@ -1,101 +1,126 @@
 import { fs } from 'zx';
 import chalk from 'chalk';
+import { detectAnalyzerType, createParser } from './parser-factory.js';
+import { validateVulnerabilities, checkDuplicates } from './validator.js';
 
 /**
- * Parse Semgrep static analyzer result.json file
+ * Parse static analyzer result file(s) - supports multiple formats
+ * @param {string|string[]} resultPath - Single path or array of paths to analyzer outputs
+ * @returns {Promise<{vulnerabilities: Array, summary: object}>}
  */
-export async function parseStaticAnalysisResult(resultJsonPath) {
-  try {
-    const content = await fs.readFile(resultJsonPath, 'utf8');
-    const result = JSON.parse(content);
+export async function parseStaticAnalysisResults(resultPath) {
+  const paths = Array.isArray(resultPath) ? resultPath : [resultPath];
+  
+  const allVulnerabilities = [];
+  const summary = {
+    bySource: {},
+    byType: {},
+    total: 0,
+    errors: []
+  };
+
+  console.log(chalk.blue(`\n📊 Processing ${paths.length} analyzer result file(s)...\n`));
+
+  for (const path of paths) {
+    console.log(chalk.blue(`📄 Processing: ${path}`));
     
-    const vulnerabilities = [];
-    
-    // Semgrep uses 'results' array
-    const findings = result.results || result.findings || [];
-    
-    for (const finding of findings) {
-      const vulnType = mapVulnerabilityType(finding);
+    try {
+      const content = await fs.readFile(path, 'utf8');
+      const data = JSON.parse(content);
       
-      if (vulnType) {
-        vulnerabilities.push({
-          id: finding.check_id || `VULN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          type: vulnType,
-          severity: finding.extra?.severity || 'ERROR',
-          confidence: finding.extra?.metadata?.confidence || 'MEDIUM',
-          location: {
-            file: finding.path,
-            line: finding.start?.line,
-            column: finding.start?.col,
-            endLine: finding.end?.line,
-            endColumn: finding.end?.col
-          },
-          description: finding.extra?.message || '',
-          cwe: finding.extra?.metadata?.cwe || [],
-          owasp: finding.extra?.metadata?.owasp || [],
-          vulnerabilityClass: finding.extra?.metadata?.vulnerability_class || [],
-          checkId: finding.check_id,
-          shortlink: finding.extra?.metadata?.shortlink || ''
-        });
+      // Auto-detect analyzer type
+      const analyzerType = detectAnalyzerType(data);
+      if (!analyzerType) {
+        const error = `Could not detect analyzer type for ${path}`;
+        console.log(chalk.yellow(`⚠️  ${error}, skipping...`));
+        summary.errors.push({ file: path, error: 'Unknown analyzer type' });
+        continue;
       }
+
+      console.log(chalk.cyan(`   ✓ Detected: ${analyzerType}`));
+
+      // Create appropriate parser and parse with error handling
+      const parser = createParser(analyzerType);
+      let vulnerabilities;
+      try {
+        vulnerabilities = await parser.parse(data);
+      } catch (parseError) {
+        console.error(chalk.red(`   ❌ Parser error: ${parseError.message}`));
+        summary.errors.push({ file: path, error: `Parser error: ${parseError.message}` });
+        continue;
+      }
+
+      // Validate
+      const validation = validateVulnerabilities(vulnerabilities);
+      if (!validation.valid) {
+        console.log(chalk.yellow(`⚠️  Validation warnings in ${path}:`));
+        validation.errors.slice(0, 5).forEach(err => {
+          console.log(chalk.yellow(`   - Index ${err.index}: ${err.errors.join(', ')}`));
+        });
+        if (validation.errors.length > 5) {
+          console.log(chalk.yellow(`   ... and ${validation.errors.length - 5} more errors`));
+        }
+      }
+
+      // Deduplicate before adding to results
+      const existingIds = new Set(allVulnerabilities.map(v => v.id));
+      const uniqueVulns = vulnerabilities.filter(v => !existingIds.has(v.id));
+      const duplicateCount = vulnerabilities.length - uniqueVulns.length;
+      
+      if (duplicateCount > 0) {
+        console.log(chalk.yellow(`   ⚠️  Skipped ${duplicateCount} duplicate(s)`));
+      }
+
+      allVulnerabilities.push(...uniqueVulns);
+
+      // Update summary
+      summary.bySource[analyzerType] = (summary.bySource[analyzerType] || 0) + uniqueVulns.length;
+      
+      console.log(chalk.green(`   ✓ Parsed ${uniqueVulns.length} vulnerabilities\n`));
+
+    } catch (error) {
+      const errorMsg = `Failed to parse ${path}: ${error.message}`;
+      console.error(chalk.red(`❌ ${errorMsg}`));
+      summary.errors.push({ file: path, error: error.message });
     }
-    
-    console.log(chalk.green(`✅ Parsed ${vulnerabilities.length} vulnerabilities from ${findings.length} total findings`));
-    
-    // Group by type for summary
-    const summary = {};
-    for (const v of vulnerabilities) {
-      summary[v.type] = (summary[v.type] || 0) + 1;
+  }
+
+  // Calculate type summary
+  for (const vuln of allVulnerabilities) {
+    summary.byType[vuln.type] = (summary.byType[vuln.type] || 0) + 1;
+  }
+  summary.total = allVulnerabilities.length;
+
+  // Print summary
+  console.log(chalk.green(`\n✅ Total vulnerabilities parsed: ${summary.total}`));
+  
+  if (Object.keys(summary.bySource).length > 0) {
+    console.log(chalk.cyan('\n📊 By Source Analyzer:'));
+    for (const [source, count] of Object.entries(summary.bySource)) {
+      console.log(chalk.cyan(`   - ${source}: ${count}`));
     }
-    for (const [type, count] of Object.entries(summary)) {
+  }
+  
+  if (Object.keys(summary.byType).length > 0) {
+    console.log(chalk.cyan('\n📊 By Vulnerability Type:'));
+    for (const [type, count] of Object.entries(summary.byType)) {
       console.log(chalk.cyan(`   - ${type}: ${count}`));
     }
-    
-    return vulnerabilities;
-    
-  } catch (error) {
-    console.error(chalk.red(`❌ Failed to parse result.json: ${error.message}`));
-    throw error;
   }
+
+  if (summary.errors.length > 0) {
+    console.log(chalk.yellow(`\n⚠️  ${summary.errors.length} file(s) had errors`));
+  }
+
+  return { vulnerabilities: allVulnerabilities, summary };
 }
 
 /**
- * Map Semgrep check_id and vulnerability_class to our internal types
+ * Backward compatibility: Parse a single static analysis result
+ * @param {string} resultJsonPath - Path to a single result file
+ * @returns {Promise<Array>} Array of vulnerabilities
  */
-function mapVulnerabilityType(finding) {
-  const checkId = finding.check_id?.toLowerCase() || '';
-  const vulnClass = finding.extra?.metadata?.vulnerability_class || [];
-  const cwe = finding.extra?.metadata?.cwe || [];
-  
-  // Check vulnerability_class first
-  for (const vc of vulnClass) {
-    const vcLower = vc.toLowerCase();
-    if (vcLower.includes('sql injection')) return 'injection';
-    if (vcLower.includes('command injection')) return 'injection';
-    if (vcLower.includes('code injection')) return 'injection';
-    if (vcLower.includes('xss') || vcLower.includes('cross-site scripting')) return 'xss';
-    if (vcLower.includes('ssrf')) return 'ssrf';
-    if (vcLower.includes('secret') || vcLower.includes('credential')) return 'secrets';
-    if (vcLower.includes('crypto')) return 'crypto';
-  }
-  
-  // Check CWE codes
-  for (const c of cwe) {
-    if (c.includes('CWE-89')) return 'injection'; // SQL Injection
-    if (c.includes('CWE-78') || c.includes('CWE-77')) return 'injection'; // Command Injection
-    if (c.includes('CWE-95') || c.includes('CWE-94')) return 'injection'; // Code Injection
-    if (c.includes('CWE-79')) return 'xss'; // XSS
-    if (c.includes('CWE-918')) return 'ssrf'; // SSRF
-    if (c.includes('CWE-798') || c.includes('CWE-321')) return 'secrets'; // Hardcoded credentials
-  }
-  
-  // Check check_id patterns
-  if (checkId.includes('injection') || checkId.includes('sqli')) return 'injection';
-  if (checkId.includes('xss')) return 'xss';
-  if (checkId.includes('ssrf')) return 'ssrf';
-  if (checkId.includes('secret') || checkId.includes('credential') || checkId.includes('jwt')) return 'secrets';
-  if (checkId.includes('auth')) return 'auth';
-  
-  // Default: include as 'other' so we don't miss anything
-  return 'other';
+export async function parseStaticAnalysisResult(resultJsonPath) {
+  const result = await parseStaticAnalysisResults(resultJsonPath);
+  return result.vulnerabilities;
 }
