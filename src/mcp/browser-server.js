@@ -1,4 +1,5 @@
 import { chromium } from 'playwright';
+import { AuthManager, getAuthManager } from '../auth/auth-manager.js';
 
 const MAX_CONTENT_LENGTH = 15000; // Max chars to return to avoid token limits
 const DEFAULT_TIMEOUT = 5000; // 5 seconds default timeout (reduced from 8s)
@@ -6,13 +7,14 @@ const SHORT_TIMEOUT = 2000; // 2 seconds for quick checks
 
 /**
  * Browser automation tools for the LLM
- * Enhanced with better error handling and element visibility checks
+ * Enhanced with better error handling, element visibility checks, and auth propagation
  */
 export class BrowserManager {
   constructor() {
     this.browser = null;
     this.context = null;
     this.page = null;
+    this.authManager = getAuthManager();
   }
 
   async ensureBrowser() {
@@ -446,17 +448,107 @@ export class BrowserManager {
   }
 
   /**
+   * Capture authentication tokens from browser storage and cookies
+   * Call this AFTER successful login to capture JWT/session tokens
+   */
+  async captureAuth() {
+    if (!this.page) throw new Error('No page open');
+    
+    try {
+      // Extract tokens from localStorage and sessionStorage
+      const storageTokens = await this.page.evaluate((keys) => {
+        const tokens = {};
+        
+        // Check localStorage
+        for (const key of keys) {
+          const value = localStorage.getItem(key);
+          if (value) {
+            tokens[`localStorage:${key}`] = value;
+          }
+        }
+        
+        // Check sessionStorage
+        for (const key of keys) {
+          const value = sessionStorage.getItem(key);
+          if (value) {
+            tokens[`sessionStorage:${key}`] = value;
+          }
+        }
+        
+        // Also check all localStorage keys for JWT-like values
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          const value = localStorage.getItem(key);
+          // Check if value looks like a JWT (3 dot-separated parts)
+          if (value && value.split('.').length === 3 && value.length > 50) {
+            tokens[`localStorage:${key}`] = value;
+          }
+        }
+        
+        return tokens;
+      }, AuthManager.JWT_STORAGE_KEYS);
+
+      // Extract cookies from browser context
+      const cookies = await this.context.cookies();
+      
+      // Store tokens in AuthManager
+      let jwtFound = false;
+      for (const [key, value] of Object.entries(storageTokens)) {
+        const result = this.authManager.setJwtToken(value, key);
+        if (result.success) {
+          jwtFound = true;
+          break; // Use first valid token found
+        }
+      }
+
+      // Store cookies
+      this.authManager.setCookies(cookies);
+
+      const status = this.authManager.getStatus();
+      
+      return {
+        status: 'success',
+        message: jwtFound ? 'JWT token captured' : 'Session cookies captured',
+        authStatus: status,
+        tokensFound: Object.keys(storageTokens).length,
+        cookiesFound: cookies.length
+      };
+    } catch (e) {
+      return { status: 'error', message: e.message };
+    }
+  }
+
+  /**
+   * Get current authentication status
+   */
+  getAuthStatus() {
+    return this.authManager.getStatus();
+  }
+
+  /**
+   * Clear stored authentication
+   */
+  clearAuth() {
+    return this.authManager.clear();
+  }
+
+  /**
    * Make a direct HTTP request (bypasses browser UI)
    * Essential for API testing
+   * ENHANCED: Auto-injects stored auth tokens from AuthManager
    */
-  async httpRequest({ url, method = 'GET', headers = {}, body = null, contentType = 'application/json' }) {
+  async httpRequest({ url, method = 'GET', headers = {}, body = null, contentType = 'application/json', useAuth = true }) {
     await this.ensureBrowser();
     try {
+      // Auto-inject auth headers if available and useAuth is true
+      const authHeaders = useAuth ? this.authManager.getAuthHeaders() : {};
+      
       const requestOptions = {
         method,
         headers: {
           'Content-Type': contentType,
-          ...headers
+          ...authHeaders,  // Inject stored auth first
+          ...headers       // Allow override from explicit headers
         }
       };
       
@@ -512,7 +604,8 @@ export class BrowserManager {
         statusText: result.statusText,
         body: result.body,
         json: result.json,
-        responseSuccess: result.success
+        responseSuccess: result.success,
+        authInjected: useAuth && this.authManager.hasAuth()
       };
     } catch (e) {
       return { status: 'error', message: e.message, url };
@@ -707,6 +800,33 @@ export class BrowserManager {
           required: ['script']
         },
         handler: this.executeScript.bind(this)
+      },
+      {
+        name: 'browser_capture_auth',
+        description: 'Capture authentication tokens (JWT/cookies) from browser storage AFTER successful login. Call this immediately after login to enable auth propagation for subsequent API requests.',
+        parameters: {
+          type: 'object',
+          properties: {}
+        },
+        handler: this.captureAuth.bind(this)
+      },
+      {
+        name: 'browser_get_auth_status',
+        description: 'Get the current authentication status - shows what tokens/cookies are stored and will be injected into requests.',
+        parameters: {
+          type: 'object',
+          properties: {}
+        },
+        handler: this.getAuthStatus.bind(this)
+      },
+      {
+        name: 'browser_clear_auth',
+        description: 'Clear all stored authentication tokens and cookies.',
+        parameters: {
+          type: 'object',
+          properties: {}
+        },
+        handler: this.clearAuth.bind(this)
       }
     ];
   }

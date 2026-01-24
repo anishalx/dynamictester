@@ -268,7 +268,7 @@ Use UNION SELECT with specific table names`,
   }
 
   /**
-   * Parse payloads from LLM response
+   * Parse payloads from LLM response with anti-hallucination validation
    * @private
    */
   parsePayloadsFromResponse(response) {
@@ -312,7 +312,62 @@ Use UNION SELECT with specific table names`,
       }
     }
 
-    return payloads.slice(0, 10); // Limit to 10 payloads
+    // ANTI-HALLUCINATION: Validate and filter payloads
+    const validatedPayloads = this.validatePayloads(payloads);
+    
+    return validatedPayloads.slice(0, 10); // Limit to 10 payloads
+  }
+
+  /**
+   * Validate payloads to filter out hallucinated/placeholder content
+   * @private
+   */
+  validatePayloads(payloads) {
+    // Placeholder patterns that indicate hallucination
+    const hallucianationPatterns = [
+      /INSERT.*?HERE/i,
+      /PAYLOAD.*?HERE/i,
+      /YOUR.*?PAYLOAD/i,
+      /example\.com/i,
+      /attacker\.com/i,  
+      /xxx+/i,
+      /\[.*?\]/,  // Bracketed placeholders like [payload]
+      /^\s*test\s*$/i,
+      /^\s*placeholder\s*$/i,
+      /^\s*sample\s*$/i,
+      /^payload\d*$/i,
+      /\{.*?payload.*?\}/i,
+      /<PAYLOAD>/i,
+      /:payload:/i
+    ];
+
+    // Minimum payload requirements
+    const validPayloads = payloads.filter(payload => {
+      // Skip very short payloads (likely not real)
+      if (payload.length < 2) return false;
+      
+      // Skip very long payloads (likely explanations)
+      if (payload.length > 500) return false;
+      
+      // Skip if it matches hallucination patterns
+      for (const pattern of hallucianationPatterns) {
+        if (pattern.test(payload)) {
+          console.warn(`[Anti-Hallucination] Filtered out: ${payload.substring(0, 50)}...`);
+          return false;
+        }
+      }
+      
+      // Skip if it looks like prose/explanation
+      const wordCount = payload.split(/\s+/).length;
+      if (wordCount > 20) {
+        console.warn(`[Anti-Hallucination] Filtered prose: ${payload.substring(0, 50)}...`);
+        return false;
+      }
+      
+      return true;
+    });
+
+    return validPayloads;
   }
 
   /**

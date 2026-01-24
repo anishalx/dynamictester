@@ -3,16 +3,23 @@ import { determineLevel, getLevelDetails } from './exploitation-levels.js';
 /**
  * Classify vulnerability based on testing evidence
  * Implements Shannon's classification decision framework
+ * 
+ * Classifications:
+ * - CONFIRMED: Exploitation proven with data extraction (Level 3-4)
+ * - LIKELY: Partial evidence, could be exploitable (Level 1-2)
+ * - BLOCKED: External factors prevent testing (auth, network, rate limit)
+ * - NOT_REPRODUCIBLE: Security controls prevent exploitation
  */
 export class VulnerabilityClassifier {
   /**
-   * Classify a tested vulnerability as EXPLOITED, POTENTIAL, or FALSE_POSITIVE
+   * Classify a tested vulnerability
    * 
    * Classification Rules:
-   * - Level 3+: Data extracted → EXPLOITED
-   * - Level 1-2 + External blocker → POTENTIAL
-   * - Level 1-2 + Security blocker → FALSE_POSITIVE
-   * - Level 0 → FALSE_POSITIVE
+   * - Level 3+: Data extracted → CONFIRMED
+   * - Level 1-2 + External blocker → BLOCKED
+   * - Level 1-2 + Security blocker → NOT_REPRODUCIBLE
+   * - Level 1-2 + No blocker → LIKELY
+   * - Level 0 → NOT_REPRODUCIBLE
    * 
    * @param {object} testResult - Complete test result with evidence
    * @returns {object} Classification decision
@@ -21,26 +28,27 @@ export class VulnerabilityClassifier {
     const level = determineLevel(testResult.evidence);
     const levelDetails = getLevelDetails(level);
     
-    // Level 3+: Data extracted = EXPLOITED
+    // Level 3+: Data extracted = CONFIRMED
     if (level >= 3) {
       return {
-        classification: 'EXPLOITED',
+        classification: 'CONFIRMED',
         level,
         levelName: levelDetails.name,
         confidence: levelDetails.confidence,
         reason: 'Successfully extracted data from target system',
         evidence: testResult.evidence,
         includeInReport: true,
-        requiresAction: true
+        requiresAction: true,
+        ciExitCode: 1  // Fail CI on confirmed exploits
       };
     }
 
     // Level 1-2: Partial confirmation, check blockers
     if (level > 0) {
-      // External blocker (auth, network, server issues) = POTENTIAL
+      // External blocker (auth, network, server issues) = BLOCKED
       if (testResult.externalBlocker) {
         return {
-          classification: 'POTENTIAL',
+          classification: 'BLOCKED',
           level,
           levelName: levelDetails.name,
           confidence: levelDetails.confidence,
@@ -49,14 +57,15 @@ export class VulnerabilityClassifier {
           evidence: testResult.evidence,
           includeInReport: true,
           requiresAction: true,
+          ciExitCode: 0,  // Don't fail CI on blocked tests
           note: 'Vulnerability may be exploitable if blocker is removed'
         };
       }
 
-      // Security blocker (prepared statements, WAF, validation) = FALSE POSITIVE
+      // Security blocker (prepared statements, WAF, validation) = NOT_REPRODUCIBLE
       if (testResult.securityBlocker) {
         return {
-          classification: 'FALSE_POSITIVE',
+          classification: 'NOT_REPRODUCIBLE',
           level,
           levelName: levelDetails.name,
           confidence: 'N/A',
@@ -65,6 +74,7 @@ export class VulnerabilityClassifier {
           evidence: testResult.evidence,
           includeInReport: false,
           requiresAction: false,
+          ciExitCode: 0,
           note: 'Static analysis finding contradicted by dynamic testing'
         };
       }
@@ -74,7 +84,7 @@ export class VulnerabilityClassifier {
       const analysis = this.analyzeBlocker(testResult);
       if (analysis.isSecurityControl) {
         return {
-          classification: 'FALSE_POSITIVE',
+          classification: 'NOT_REPRODUCIBLE',
           level,
           levelName: levelDetails.name,
           confidence: 'N/A',
@@ -82,13 +92,29 @@ export class VulnerabilityClassifier {
           securityControl: analysis.details,
           evidence: testResult.evidence,
           includeInReport: false,
-          requiresAction: false
+          requiresAction: false,
+          ciExitCode: 0
         };
       }
 
-      // Default for Level 1-2 without clear blocker = POTENTIAL (low confidence)
+      if (analysis.isExternalConstraint) {
+        return {
+          classification: 'BLOCKED',
+          level,
+          levelName: levelDetails.name,
+          confidence: 'LOW',
+          reason: analysis.details,
+          evidence: testResult.evidence,
+          includeInReport: true,
+          requiresAction: true,
+          ciExitCode: 0,
+          note: 'Testing blocked by external constraint'
+        };
+      }
+
+      // Default for Level 1-2 without clear blocker = LIKELY
       return {
-        classification: 'POTENTIAL',
+        classification: 'LIKELY',
         level,
         levelName: levelDetails.name,
         confidence: 'LOW',
@@ -96,13 +122,14 @@ export class VulnerabilityClassifier {
         evidence: testResult.evidence,
         includeInReport: true,
         requiresAction: true,
+        ciExitCode: 0,  // Don't fail CI on LIKELY (use --fail-on-likely flag to change)
         note: 'Further investigation recommended'
       };
     }
 
-    // Level 0: No evidence = FALSE POSITIVE
+    // Level 0: No evidence = NOT_REPRODUCIBLE
     return {
-      classification: 'FALSE_POSITIVE',
+      classification: 'NOT_REPRODUCIBLE',
       level: 0,
       levelName: levelDetails.name,
       confidence: 'N/A',
@@ -112,6 +139,7 @@ export class VulnerabilityClassifier {
       evidence: testResult.evidence,
       includeInReport: false,
       requiresAction: false,
+      ciExitCode: 0,
       note: 'Static analysis appears to be incorrect'
     };
   }
@@ -218,24 +246,34 @@ export class VulnerabilityClassifier {
   static summarize(classifications) {
     const summary = {
       total: classifications.length,
-      exploited: 0,
-      potential: 0,
-      falsePositive: 0,
+      confirmed: 0,
+      likely: 0,
+      blocked: 0,
+      notReproducible: 0,
       byLevel: { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0 },
       criticalImpact: 0,
-      requiresAction: 0
+      requiresAction: 0,
+      ciExitCode: 0
     };
 
     for (const result of classifications) {
       summary.byLevel[result.level] = (summary.byLevel[result.level] || 0) + 1;
 
-      if (result.classification === 'EXPLOITED') {
-        summary.exploited++;
-        if (result.level === 4) summary.criticalImpact++;
-      } else if (result.classification === 'POTENTIAL') {
-        summary.potential++;
-      } else {
-        summary.falsePositive++;
+      switch (result.classification) {
+        case 'CONFIRMED':
+          summary.confirmed++;
+          if (result.level === 4) summary.criticalImpact++;
+          summary.ciExitCode = 1; // Fail CI if any confirmed
+          break;
+        case 'LIKELY':
+          summary.likely++;
+          break;
+        case 'BLOCKED':
+          summary.blocked++;
+          break;
+        case 'NOT_REPRODUCIBLE':
+          summary.notReproducible++;
+          break;
       }
 
       if (result.requiresAction) {
@@ -243,8 +281,8 @@ export class VulnerabilityClassifier {
       }
     }
 
-    summary.accuracyRate = summary.total > 0
-      ? ((summary.exploited + summary.potential) / summary.total * 100).toFixed(1) + '%'
+    summary.exploitableRate = summary.total > 0
+      ? ((summary.confirmed + summary.likely) / summary.total * 100).toFixed(1) + '%'
       : '0%';
 
     return summary;
