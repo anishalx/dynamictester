@@ -10,18 +10,25 @@ Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL,
 
 | Feature | Description |
 |---------|-------------|
-| **Multi-Analyzer Support** | Semgrep, Trivy, CodeQL, Syft, and custom parsers |
+| **Multi-Analyzer Support** | Semgrep, Trivy, CodeQL, Syft, OSV, Gitleaks, Noir parsers |
 | **Universal Prompts** | Context-aware testing for any web application |
 | **LLM-Crafted Payloads** | Technology-specific payloads from static analysis context |
 | **Source Code Mapping** | Links findings to exact `file:line:column` for developers |
 | **Industry Reports** | SARIF for IDE integration, HTML for stakeholders |
 | **Advanced Browser Tools** | HTTP requests, force clicks, scrolling, script execution |
+| **Route Intelligence** | Automatic Express router parsing for endpoint discovery |
+| **Auth Propagation** | JWT/cookie capture and injection across tests |
+| **WAF Bypass Engine** | LLM-powered bypass generation for blocked payloads |
+| **Response Analysis** | Intelligent detection of database errors, WAF blocking, validation errors |
+| **Confidence Scoring** | CONFIRMED/LIKELY/BLOCKED/NOT_REPRODUCIBLE classification |
+| **CI Mode** | Exit codes and reports for CI/CD pipeline integration |
 
 ---
 
 ## 📋 Table of Contents
 
 - [Architecture](#architecture)
+- [Project Structure](#project-structure)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Output & Reports](#output--reports)
@@ -45,20 +52,100 @@ Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL,
 │  │             │   │  Generator  │   │             │   │                 │  │
 │  │ Semgrep     │   │             │   │ OpenAI GPT  │   │ • SARIF         │  │
 │  │ Trivy       │   │ Groups by   │   │ LLM Agent   │   │ • HTML          │  │
-│  │ CodeQL      │   │ vuln type   │   │             │   │ • JSON Summary  │  │
-│  │ Syft        │   │             │   │             │   │                 │  │
+│  │ CodeQL      │   │ vuln type   │   │ + Bypass    │   │ • JSON Summary  │  │
+│  │ Syft/OSV    │   │             │   │   Engine    │   │ • CI Report     │  │
+│  │ Gitleaks    │   │             │   │             │   │                 │  │
+│  │ Noir        │   │             │   │             │   │                 │  │
 │  └─────────────┘   └─────────────┘   └──────┬──────┘   └─────────────────┘  │
-│                                             │                                │
-│                                    ┌────────▼────────┐                       │
-│                                    │ Browser Manager │                       │
-│                                    │                 │                       │
-│                                    │ • HTTP Requests │                       │
-│                                    │ • Form Filling  │                       │
-│                                    │ • Force Click   │                       │
-│                                    │ • Script Exec   │                       │
-│                                    └─────────────────┘                       │
-│                                                                              │
+│         │                                   │                                │
+│         ▼                                   ▼                                │
+│  ┌─────────────┐                   ┌────────────────┐                        │
+│  │   Route     │                   │ Browser Manager│                        │
+│  │ Intelligence│                   │                │                        │
+│  │             │                   │ • HTTP Requests│                        │
+│  │ Express     │                   │ • Form Filling │                        │
+│  │ Router      │                   │ • Force Click  │                        │
+│  │ Parsing     │                   │ • Script Exec  │                        │
+│  └──────┬──────┘                   └───────┬────────┘                        │
+│         │                                  │                                 │
+│         ▼                                  ▼                                 │
+│  ┌─────────────┐                   ┌────────────────┐                        │
+│  │    Auth     │                   │    Response    │                        │
+│  │   Manager   │◀─────────────────▶│    Analyzer    │                        │
+│  │             │                   │                │                        │
+│  │ JWT/Cookie  │                   │ DB Errors      │                        │
+│  │ Injection   │                   │ WAF Detection  │                        │
+│  └─────────────┘                   │ Classification │                        │
+│                                    └────────────────┘                        │
 └─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Project Structure
+
+```
+dynamictester/
+├── src/
+│   ├── main.js                          # Application entry point
+│   │
+│   ├── agents/
+│   │   └── executor.js                  # OpenAI GPT agent with tool execution
+│   │
+│   ├── auth/
+│   │   └── auth-manager.js              # JWT/cookie capture and injection
+│   │
+│   ├── mcp/
+│   │   └── browser-server.js            # Playwright browser automation (13 tools)
+│   │
+│   ├── parser/
+│   │   ├── normalizer.js                # Normalize findings across analyzers
+│   │   ├── parser-factory.js            # Auto-detect and instantiate parsers
+│   │   ├── parser-interface.js          # Base parser interface
+│   │   ├── result-parser.js             # Main parsing coordinator
+│   │   ├── route-parser.js              # Express router intelligence
+│   │   ├── validator.js                 # Input validation
+│   │   └── parsers/
+│   │       ├── semgrep-parser.js        # Semgrep JSON parser
+│   │       ├── trivy-parser.js          # Trivy security scanner parser
+│   │       ├── codeql-parser.js         # CodeQL SARIF parser
+│   │       ├── syft-parser.js           # Syft SBOM parser
+│   │       ├── osv-parser.js            # OSV vulnerability scanner parser
+│   │       ├── gitleaks-parser.js       # Gitleaks secrets scanner parser
+│   │       └── noir-parser.js           # Noir parser
+│   │
+│   ├── queue/
+│   │   └── queue-generator.js           # Group vulnerabilities by type
+│   │
+│   ├── reporting/
+│   │   ├── report-generator.js          # SARIF, HTML, JSON report generation
+│   │   └── ci-reporter.js               # CI/CD exit codes and summaries
+│   │
+│   ├── testing/
+│   │   ├── bypass-engine.js             # LLM-powered WAF/filter bypass
+│   │   ├── classifier.js                # CONFIRMED/LIKELY/BLOCKED classification
+│   │   ├── exploitation-levels.js       # 4-level proof system (L0-L4)
+│   │   ├── intelligence-aggregator.js   # Gather context for payload generation
+│   │   ├── payload-generator.js         # LLM payload crafting with anti-hallucination
+│   │   ├── response-analyzer.js         # DB errors, WAF, validation detection
+│   │   └── test-interface.js            # Testing interface
+│   │
+│   └── utils/
+│       ├── error-handling.js            # Global error handlers
+│       └── rate-limiter.js              # API rate limiting with backoff
+│
+├── prompts/
+│   ├── exploit-injection.txt            # SQL/Command injection payloads
+│   ├── exploit-xss.txt                  # Cross-site scripting payloads
+│   ├── exploit-traversal.txt            # Path traversal payloads
+│   ├── exploit-xxe.txt                  # XML external entity payloads
+│   ├── exploit-redirect.txt             # Open redirect payloads
+│   ├── exploit-secrets.txt              # Hardcoded secrets validation
+│   └── exploit-generic.txt              # General vulnerability testing
+│
+├── package.json                         # Dependencies and scripts
+├── README.md                            # This file
+└── MULTI_ANALYZER_USAGE.md              # Multi-analyzer usage guide
 ```
 
 ---
@@ -427,12 +514,15 @@ Built-in `RateLimiter` handles API limits automatically:
 
 ## Supported Analyzers
 
-| Analyzer | File Format | Parser |
-|----------|-------------|--------|
-| Semgrep | JSON | `semgrep-parser.js` |
-| Trivy | JSON | `trivy-parser.js` |
-| CodeQL | SARIF | `codeql-parser.js` |
-| Syft | JSON | `syft-parser.js` |
+| Analyzer | File Format | Parser | Description |
+|----------|-------------|--------|-------------|
+| Semgrep | JSON | `semgrep-parser.js` | SAST for code patterns |
+| Trivy | JSON | `trivy-parser.js` | Container/IaC security |
+| CodeQL | SARIF | `codeql-parser.js` | GitHub CodeQL analysis |
+| Syft | JSON | `syft-parser.js` | SBOM generation |
+| OSV | JSON | `osv-parser.js` | Open-source vulnerabilities |
+| Gitleaks | JSON | `gitleaks-parser.js` | Secrets scanner |
+| Noir | JSON | `noir-parser.js` | API endpoint discovery |
 
 ---
 
