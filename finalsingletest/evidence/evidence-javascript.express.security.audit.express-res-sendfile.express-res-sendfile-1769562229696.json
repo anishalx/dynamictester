@@ -1,0 +1,26 @@
+{
+  "findingId": "javascript.express.security.audit.express-res-sendfile.express-res-sendfile",
+  "timestamp": "2026-01-28T01:03:49.696Z",
+  "sourceLocation": {
+    "file": "routes/logfileServer.ts",
+    "line": 14,
+    "column": 20
+  },
+  "vulnerability": {
+    "cwe": "CWE-73",
+    "owasp": null,
+    "xssType": null,
+    "injectionContext": null,
+    "secretType": null
+  },
+  "exploitation": {
+    "endpoint": "/log",
+    "method": null,
+    "payload": "../../../etc/passwd",
+    "response": null,
+    "success": false,
+    "proof": "All traversal attempts resulted in generic HTML responses, without access to sensitive files."
+  },
+  "remediation": null,
+  "status": "TESTED_NOT_EXPLOITABLE"
+}

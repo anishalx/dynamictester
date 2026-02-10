@@ -1,0 +1,26 @@
+{
+  "findingId": "javascript.audit.detect-replaceall-sanitization.detect-replaceall-sanitization",
+  "timestamp": "2026-01-28T00:54:07.196Z",
+  "sourceLocation": {
+    "file": "data/static/codefixes/restfulXssChallenge_2.ts",
+    "line": 62,
+    "column": 34
+  },
+  "vulnerability": {
+    "cwe": "CWE-79",
+    "owasp": null,
+    "xssType": "DOM",
+    "injectionContext": "HTML",
+    "secretType": null
+  },
+  "exploitation": {
+    "endpoint": "http://localhost:3000/",
+    "method": null,
+    "payload": "#<img src=x onerror=alert(document.domain)>",
+    "response": null,
+    "success": false,
+    "proof": "No reflection or execution detected."
+  },
+  "remediation": null,
+  "status": "TESTED_NOT_EXPLOITABLE"
+}

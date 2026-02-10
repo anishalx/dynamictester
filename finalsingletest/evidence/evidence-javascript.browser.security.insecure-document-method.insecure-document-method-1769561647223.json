@@ -1,0 +1,26 @@
+{
+  "findingId": "javascript.browser.security.insecure-document-method.insecure-document-method",
+  "timestamp": "2026-01-28T00:54:07.223Z",
+  "sourceLocation": {
+    "file": "frontend/src/hacking-instructor/index.ts",
+    "line": 122,
+    "column": 3
+  },
+  "vulnerability": {
+    "cwe": "CWE-79",
+    "owasp": null,
+    "xssType": "Reflected",
+    "injectionContext": "HTML",
+    "secretType": null
+  },
+  "exploitation": {
+    "endpoint": "http://localhost:3000/?search=<img src=x onerror=alert(1)>&submit=Search",
+    "method": null,
+    "payload": "<img src=x onerror=alert(1)>",
+    "response": null,
+    "success": false,
+    "proof": "Payload was not executed or found in the DOM structure."
+  },
+  "remediation": null,
+  "status": "TESTED_NOT_EXPLOITABLE"
+}

@@ -1,0 +1,97 @@
+[
+  {
+    "id": "javascript.audit.detect-replaceall-sanitization.detect-replaceall-sanitization",
+    "status": "TESTED_NOT_EXPLOITABLE",
+    "file": "data/static/codefixes/restfulXssChallenge_2.ts",
+    "line": 62,
+    "cwe": "CWE-79",
+    "endpoint": "http://localhost:3000/",
+    "success": false
+  },
+  {
+    "id": "javascript.browser.security.insecure-document-method.insecure-document-method",
+    "status": "TESTED_NOT_EXPLOITABLE",
+    "file": "frontend/src/hacking-instructor/index.ts",
+    "line": 122,
+    "cwe": "CWE-79",
+    "endpoint": "http://localhost:3000/?search=<img src=x onerror=alert(1)>&submit=Search",
+    "success": false
+  },
+  {
+    "id": "generic.secrets.security.detected-generic-secret.detected-generic-secret",
+    "status": "CONFIRMED",
+    "file": "data/static/users.yml",
+    "line": 150,
+    "type": "HardcodedSecret",
+    "cwe": "CWE-798",
+    "endpoint": "http://localhost:3000/login",
+    "success": true
+  },
+  {
+    "id": "generic.secrets.security.detected-jwt-token.detected-jwt-token",
+    "status": "TESTED_NOT_EXPLOITABLE",
+    "file": "frontend/src/app/app.guard.spec.ts",
+    "line": 38,
+    "type": "HardcodedSecret",
+    "cwe": "CWE-321",
+    "endpoint": "http://localhost:3000/api/users",
+    "success": false
+  },
+  {
+    "id": "generic.secrets.security.detected-jwt-token.detected-jwt-token",
+    "status": "TESTED_NOT_EXPLOITABLE",
+    "file": "frontend/src/app/last-login-ip/last-login-ip.component.spec.ts",
+    "line": 61,
+    "type": "HardcodedSecret",
+    "cwe": "CWE-321",
+    "endpoint": "http://localhost:3000/api/users",
+    "success": false
+  },
+  {
+    "id": "javascript.jsonwebtoken.security.jwt-hardcode.hardcoded-jwt-secret",
+    "status": "TESTED_NOT_EXPLOITABLE",
+    "file": "lib/insecurity.ts",
+    "line": 56,
+    "type": "HardcodedSecret",
+    "cwe": "CWE-798",
+    "endpoint": "http://localhost:3000/api/login",
+    "success": false
+  },
+  {
+    "id": "javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop",
+    "status": "TESTED_NOT_EXPLOITABLE",
+    "file": "frontend/src/hacking-instructor/helpers/helpers.ts",
+    "line": 38,
+    "type": "prototype pollution",
+    "cwe": "CWE-915",
+    "endpoint": "/api/v1/helpers",
+    "success": false
+  },
+  {
+    "id": "javascript.express.security.audit.express-res-sendfile.express-res-sendfile",
+    "status": "TESTED_NOT_EXPLOITABLE",
+    "file": "routes/fileServer.ts",
+    "line": 33,
+    "cwe": "CWE-73",
+    "endpoint": "/file",
+    "success": false
+  },
+  {
+    "id": "javascript.express.security.audit.express-res-sendfile.express-res-sendfile",
+    "status": "TESTED_NOT_EXPLOITABLE",
+    "file": "routes/keyServer.ts",
+    "line": 14,
+    "cwe": "CWE-73",
+    "endpoint": "/key",
+    "success": false
+  },
+  {
+    "id": "javascript.express.security.audit.express-res-sendfile.express-res-sendfile",
+    "status": "TESTED_NOT_EXPLOITABLE",
+    "file": "routes/logfileServer.ts",
+    "line": 14,
+    "cwe": "CWE-73",
+    "endpoint": "/log",
+    "success": false
+  }
+]
