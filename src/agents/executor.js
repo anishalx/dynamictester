@@ -10,6 +10,10 @@ import {
   formatDelay,
   sleep 
 } from '../utils/rate-limiter.js';
+import { PayloadGenerator } from '../testing/payload-generator.js';
+import { BypassEngine } from '../testing/bypass-engine.js';
+import { ResponseAnalyzer } from '../testing/response-analyzer.js';
+import { IntelligenceAggregator } from '../testing/intelligence-aggregator.js';
 
 const openai = new OpenAI();
 
@@ -81,6 +85,32 @@ CRITICAL INSTRUCTIONS:
 5. If browser_click fails with timeout, use browser_force_click instead
 6. Save evidence for EACH vulnerability with FULL source mapping
 
+TESTING METHODOLOGY (3-STAGE WORKFLOW):
+For EACH vulnerability, follow this sequence:
+
+Stage 1 - CONFIRMATION: Call generate_payloads with stage="confirmation" first.
+  Use the returned guidance and fallback payloads to detect if the vuln exists.
+  After each request, call analyze_response to interpret the result.
+
+Stage 2 - FINGERPRINT: If confirmed, call generate_payloads with stage="fingerprint".
+  Identify the specific technology (database type, template engine, etc.).
+  Call analyze_response to detect database errors and technology signatures.
+
+Stage 3 - EXPLOIT: Call generate_payloads with stage="exploit".
+  Extract data or demonstrate impact using technology-specific payloads.
+
+BYPASS WORKFLOW:
+- If a payload returns 403, WAF blocking, or is rejected, call generate_bypasses
+  with the blocked payload. It returns encoded/obfuscated alternatives.
+- Try the bypass payloads and analyze responses again.
+- If all bypasses fail, move on (the vulnerability may be properly mitigated).
+
+RESPONSE ANALYSIS:
+- ALWAYS call analyze_response after receiving test results
+- It detects: database errors (SQLi confirmed), WAF blocking, input validation
+- For blind injection: provide true/false response bodies for boolean comparison
+- For time-based: provide normalTime, delayedTime, expectedDelay
+
 ENDPOINT DISCOVERY FROM SOURCE FILES:
 - routes/users.js    → /users, /api/users
 - controllers/auth.js → /auth, /login
@@ -88,19 +118,250 @@ ENDPOINT DISCOVERY FROM SOURCE FILES:
 - views/search.ejs   → /search
 Use the file path pattern to derive likely endpoints
 
-PAYLOAD CRAFTING:
-- Check technology stack in metadata (express, django, spring, etc.)
-- Use the code snippet to understand injection context
-- Generate 3-5 targeted payloads per vulnerability
-
 TOOL USAGE:
 - read_queue_file: Get ALL vulnerabilities with source context FIRST
+- generate_payloads: Call BEFORE testing each vuln (returns context + fallback payloads)
+- analyze_response: Call AFTER each test request (interprets results)
+- generate_bypasses: Call when payload is BLOCKED (returns bypass variations)
 - browser_http_request: PREFERRED for API testing
 - browser_force_click: Use when normal click times out
 - save_evidence: Include full source mapping (file, line, column)`;
   
   const browserManager = new BrowserManager();
   
+  // Initialize testing utilities (shared across all tool calls within this agent)
+  const payloadGenerator = new PayloadGenerator(model);
+  const bypassEngine = new BypassEngine(10);
+  const intelligenceAggregator = new IntelligenceAggregator(outputDir);
+
+  // ---------------------------------------------------------------------------
+  // New tool handlers: generate_payloads, analyze_response, generate_bypasses
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Generate structured payload context for the LLM to craft accurate payloads.
+   * Combines intelligence aggregation + payload templates + fallback payloads.
+   */
+  async function generate_payloads(params) {
+    const {
+      vulnerabilityId,
+      vulnerabilityType,
+      stage = 'confirmation',
+      file,
+      line,
+      snippet,
+      cwe,
+      previousResults
+    } = params;
+
+    try {
+      // Build a vulnerability object from the parameters
+      const vulnerability = {
+        id: vulnerabilityId,
+        vulnerabilityType: vulnerabilityType,
+        type: vulnerabilityType,
+        file: file || 'unknown',
+        line: line || null,
+        snippet: snippet || null,
+        cwe: cwe || null
+      };
+
+      // Gather technology context from intelligence deliverables
+      const techContext = await intelligenceAggregator.aggregateContext(vulnerabilityType);
+
+      // Generate structured payload context (no LLM call — pure utility)
+      const payloadContext = payloadGenerator.generatePayloadContext(
+        vulnerability,
+        techContext,
+        stage,
+        previousResults || null
+      );
+
+      return {
+        status: 'success',
+        guidance: payloadContext.systemGuidance,
+        stageInstructions: payloadContext.stageInstructions,
+        technologyContext: payloadContext.technologyContext,
+        fallbackPayloads: payloadContext.fallbackPayloads,
+        detectedTech: {
+          database: techContext.database,
+          framework: techContext.framework,
+          language: techContext.language,
+          os: techContext.os,
+          waf: techContext.waf
+        },
+        stage: payloadContext.stage,
+        vulnType: payloadContext.vulnType
+      };
+    } catch (e) {
+      return { status: 'error', message: e.message };
+    }
+  }
+
+  /**
+   * Analyze an HTTP response for vulnerability indicators.
+   * Detects DB errors, WAF blocking, validation errors, and performs boolean comparison.
+   */
+  async function analyze_response(params) {
+    const {
+      responseBody,
+      responseStatus,
+      responseHeaders,
+      testType,
+      // Optional: for boolean-based comparison
+      trueResponseBody,
+      trueResponseStatus,
+      falseResponseBody,
+      falseResponseStatus,
+      // Optional: for timing analysis
+      normalTime,
+      delayedTime,
+      expectedDelay
+    } = params;
+
+    try {
+      const response = {
+        body: responseBody || '',
+        status: responseStatus || 200,
+        headers: responseHeaders || ''
+      };
+
+      const analysis = {
+        status: 'success'
+      };
+
+      // Detect database errors (indicates SQL injection)
+      analysis.databaseErrors = ResponseAnalyzer.detectDatabaseErrors(response);
+
+      // Detect WAF blocking (indicates payload was caught)
+      analysis.wafBlocking = ResponseAnalyzer.detectWAFBlocking(response);
+
+      // Check for input validation errors (often false positive)
+      analysis.isValidationError = ResponseAnalyzer.isValidationError(response);
+
+      // Boolean comparison (if both true/false responses provided)
+      if (trueResponseBody !== undefined && falseResponseBody !== undefined) {
+        analysis.booleanComparison = ResponseAnalyzer.compareBooleanResponses(
+          { body: trueResponseBody, status: trueResponseStatus || 200 },
+          { body: falseResponseBody, status: falseResponseStatus || 200 }
+        );
+      }
+
+      // Timing analysis (if timing data provided)
+      if (normalTime !== undefined && delayedTime !== undefined && expectedDelay !== undefined) {
+        analysis.timingAnalysis = ResponseAnalyzer.measureTimingDifference(
+          normalTime,
+          delayedTime,
+          expectedDelay
+        );
+      }
+
+      // Provide interpretation guidance
+      analysis.interpretation = _buildInterpretation(analysis, testType);
+
+      return analysis;
+    } catch (e) {
+      return { status: 'error', message: e.message };
+    }
+  }
+
+  /**
+   * Generate bypass variations when a payload is blocked by WAF/filter.
+   * Returns encoding-based and technique-based alternatives.
+   */
+  async function generate_bypasses(params) {
+    const {
+      blockedPayload,
+      blockReason,
+      httpStatus,
+      wafName,
+      vulnerabilityType,
+      database
+    } = params;
+
+    try {
+      const blockingContext = {
+        reason: blockReason || 'unknown',
+        httpStatus: httpStatus || null,
+        wafName: wafName || null,
+        wafDetected: !!wafName
+      };
+
+      const vulnerability = {
+        vulnerabilityType: vulnerabilityType || 'injection',
+        type: vulnerabilityType || 'injection'
+      };
+
+      const techContext = {
+        database: database || null
+      };
+
+      const result = bypassEngine.generateBypasses(
+        blockedPayload,
+        blockingContext,
+        vulnerability,
+        techContext
+      );
+
+      return {
+        status: 'success',
+        bypasses: result.bypasses,
+        guidance: result.guidance,
+        techniques: result.techniques,
+        blockedHistory: result.blockedHistory,
+        attemptsUsed: result.attemptsUsed,
+        attemptsRemaining: result.attemptsRemaining,
+        exhausted: bypassEngine.isExhausted()
+      };
+    } catch (e) {
+      return { status: 'error', message: e.message };
+    }
+  }
+
+  /**
+   * Build human-readable interpretation of response analysis
+   * @private
+   */
+  function _buildInterpretation(analysis, testType) {
+    const parts = [];
+
+    if (analysis.databaseErrors.detected) {
+      parts.push(`DATABASE ERROR DETECTED (${analysis.databaseErrors.database}): Strong indicator of SQL injection. Confidence: ${analysis.databaseErrors.confidence}.`);
+    }
+
+    if (analysis.wafBlocking.detected) {
+      parts.push(`WAF BLOCKING DETECTED (${analysis.wafBlocking.waf}): Payload was caught by security filter. Use generate_bypasses to get bypass variations.`);
+    }
+
+    if (analysis.isValidationError) {
+      parts.push('INPUT VALIDATION: Response suggests input validation rejected the payload (this is NOT a vulnerability indicator — it means the app has proper validation).');
+    }
+
+    if (analysis.booleanComparison) {
+      const bc = analysis.booleanComparison;
+      if (bc.different) {
+        parts.push(`BOOLEAN DIFFERENCE DETECTED: True/false conditions produce different responses (confidence: ${bc.confidence}). This suggests boolean-based blind injection.`);
+      } else {
+        parts.push('BOOLEAN COMPARISON: No significant difference between true/false conditions.');
+      }
+    }
+
+    if (analysis.timingAnalysis) {
+      const ta = analysis.timingAnalysis;
+      if (ta.confirmed) {
+        parts.push(`TIMING CONFIRMED: Delay of ${ta.actualDelay}s detected (expected ${ta.expectedDelay}s). Confidence: ${ta.confidence}. Time-based blind injection likely.`);
+      } else {
+        parts.push(`TIMING INCONCLUSIVE: Only ${ta.actualDelay}s delay vs expected ${ta.expectedDelay}s.`);
+      }
+    }
+
+    if (parts.length === 0) {
+      parts.push('No strong vulnerability indicators detected in this response. Consider trying different payloads or techniques.');
+    }
+
+    return parts.join('\n');
+  }
+
   // Enhanced evidence collection tool with developer-friendly output
   async function save_evidence(params) {
     const {
@@ -255,6 +516,82 @@ TOOL USAGE:
           }
         }
       }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'generate_payloads',
+        description: 'Generate context-aware payload guidance for a vulnerability. Call this BEFORE testing each vulnerability to get technology-specific payloads, stage instructions, and fallback payloads. Returns structured context so you can craft accurate payloads.',
+        parameters: {
+          type: 'object',
+          properties: {
+            vulnerabilityId: { type: 'string', description: 'Vulnerability ID from queue' },
+            vulnerabilityType: { type: 'string', description: 'Type: injection, xss, ssrf, ssti, traversal, xxe, redirect, auth, secrets, command_injection, deserialization, config, crypto' },
+            stage: { type: 'string', description: 'Testing stage: confirmation (detect), fingerprint (identify), exploit (extract data), refinement (improve)' },
+            file: { type: 'string', description: 'Source file path from static analysis' },
+            line: { type: 'number', description: 'Line number in source file' },
+            snippet: { type: 'string', description: 'Code snippet from static analysis' },
+            cwe: { type: 'string', description: 'CWE identifier (e.g., CWE-89)' },
+            previousResults: {
+              type: 'array',
+              description: 'Results from prior test attempts for refinement',
+              items: {
+                type: 'object',
+                properties: {
+                  payload: { type: 'string' },
+                  success: { type: 'boolean' },
+                  error: { type: 'string' },
+                  response: { type: 'string' }
+                }
+              }
+            }
+          },
+          required: ['vulnerabilityId', 'vulnerabilityType', 'stage']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'analyze_response',
+        description: 'Analyze an HTTP response for vulnerability indicators. Detects database errors (SQLi), WAF blocking, validation errors. Supports boolean-based comparison and timing analysis. Call this AFTER receiving test results to determine if the payload worked.',
+        parameters: {
+          type: 'object',
+          properties: {
+            responseBody: { type: 'string', description: 'The HTTP response body text' },
+            responseStatus: { type: 'number', description: 'HTTP status code' },
+            responseHeaders: { type: 'string', description: 'Response headers as string' },
+            testType: { type: 'string', description: 'Type of test: injection, xss, ssrf, etc.' },
+            trueResponseBody: { type: 'string', description: 'For boolean-based: response body with true condition' },
+            trueResponseStatus: { type: 'number', description: 'For boolean-based: status with true condition' },
+            falseResponseBody: { type: 'string', description: 'For boolean-based: response body with false condition' },
+            falseResponseStatus: { type: 'number', description: 'For boolean-based: status with false condition' },
+            normalTime: { type: 'number', description: 'For timing-based: normal response time in seconds' },
+            delayedTime: { type: 'number', description: 'For timing-based: delayed response time in seconds' },
+            expectedDelay: { type: 'number', description: 'For timing-based: expected delay in seconds' }
+          },
+          required: ['responseBody', 'responseStatus']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'generate_bypasses',
+        description: 'Generate WAF/filter bypass variations for a blocked payload. Returns encoded and technique-based alternatives. Call this when a payload is blocked (403, WAF detection, filter rejection).',
+        parameters: {
+          type: 'object',
+          properties: {
+            blockedPayload: { type: 'string', description: 'The payload that was blocked' },
+            blockReason: { type: 'string', description: 'Why it was blocked (WAF, validation, 403, etc.)' },
+            httpStatus: { type: 'number', description: 'HTTP status code received' },
+            wafName: { type: 'string', description: 'Detected WAF name (cloudflare, modsecurity, etc.)' },
+            vulnerabilityType: { type: 'string', description: 'Type: injection, xss, ssrf, traversal, etc.' },
+            database: { type: 'string', description: 'Database type if known (mysql, postgresql, etc.)' }
+          },
+          required: ['blockedPayload', 'vulnerabilityType']
+        }
+      }
     }
   ];
 
@@ -262,6 +599,9 @@ TOOL USAGE:
   const toolHandlers = {
     save_evidence,
     read_queue_file,
+    generate_payloads,
+    analyze_response,
+    generate_bypasses,
     ...Object.fromEntries(browserTools.map(t => [t.name, t.handler]))
   };
 
@@ -274,7 +614,7 @@ TOOL USAGE:
     { role: 'system', content: systemPrompt },
     { 
       role: 'user', 
-      content: `Target: ${targetUrl}\n\nVulnerabilities to test:\n${vulnSummary}\n\nStart testing. Use browser_get_response to find form inputs, then test with payloads.` 
+      content: `Target: ${targetUrl}\n\nVulnerabilities to test:\n${vulnSummary}\n\nStart testing. First call read_queue_file to get all vulnerabilities. For each vulnerability, call generate_payloads to get context-aware payloads before testing. After each test request, call analyze_response to interpret results. If blocked, call generate_bypasses for alternatives.` 
     }
   ];
 
