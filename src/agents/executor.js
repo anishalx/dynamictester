@@ -131,7 +131,7 @@ TOOL USAGE:
   
   // Initialize testing utilities (shared across all tool calls within this agent)
   const payloadGenerator = new PayloadGenerator(model);
-  const bypassEngine = new BypassEngine(10);
+  const bypassEngine = new BypassEngine(50);
   const intelligenceAggregator = new IntelligenceAggregator(outputDir);
 
   // ---------------------------------------------------------------------------
@@ -625,8 +625,7 @@ TOOL USAGE:
 
   try {
     while (turnCount < maxTurns) {
-      turnCount++;
-      console.log(chalk.blue(`\n🤖 Turn ${turnCount}:`));
+      console.log(chalk.blue(`\n🤖 Turn ${turnCount + 1}:`));
 
       // Use rate limiter for API call with retry logic
       let response;
@@ -638,12 +637,15 @@ TOOL USAGE:
               messages: messages,
               tools: tools,
               tool_choice: 'auto',
-              max_tokens: 1000,
+              max_tokens: 4096,
+              temperature: 0.2,
             });
           },
-          `OpenAI API request (turn ${turnCount})`,
+          `OpenAI API request (turn ${turnCount + 1})`,
           { maxRetries }
         );
+        // Only count the turn after a successful API response
+        turnCount++;
         consecutiveErrors = 0; // Reset on success
       } catch (apiError) {
         consecutiveErrors++;

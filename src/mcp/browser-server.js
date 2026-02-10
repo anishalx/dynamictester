@@ -533,78 +533,75 @@ export class BrowserManager {
   }
 
   /**
-   * Make a direct HTTP request (bypasses browser UI)
-   * Essential for API testing
-   * ENHANCED: Auto-injects stored auth tokens from AuthManager
+   * Make a direct HTTP request using Node.js native fetch (bypasses CORS).
+   * Essential for API testing — works without navigating the browser first.
+   * ENHANCED: Auto-injects stored auth tokens from AuthManager and browser cookies.
+   *
+   * @param {object} params
+   * @param {string} params.url - Request URL
+   * @param {string} [params.method='GET'] - HTTP method
+   * @param {object} [params.headers={}] - Additional headers
+   * @param {string|object|null} [params.body=null] - Request body
+   * @param {string} [params.contentType='application/json'] - Content-Type header
+   * @param {boolean} [params.useAuth=true] - Whether to inject stored auth
+   * @returns {Promise<object>} Status object with response data
    */
   async httpRequest({ url, method = 'GET', headers = {}, body = null, contentType = 'application/json', useAuth = true }) {
-    await this.ensureBrowser();
     try {
       // Auto-inject auth headers if available and useAuth is true
       const authHeaders = useAuth ? this.authManager.getAuthHeaders() : {};
-      
-      const requestOptions = {
-        method,
-        headers: {
-          'Content-Type': contentType,
-          ...authHeaders,  // Inject stored auth first
-          ...headers       // Allow override from explicit headers
-        }
-      };
-      
-      if (body && method !== 'GET') {
-        requestOptions.data = typeof body === 'string' ? body : JSON.stringify(body);
+
+      // Extract cookies from browser context if it exists
+      let cookieHeader = '';
+      if (this.context) {
+        try {
+          const cookies = await this.context.cookies();
+          if (cookies.length > 0) {
+            cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+          }
+        } catch (e) { /* Browser context not ready yet */ }
       }
 
-      // Use page.evaluate to make fetch request with same cookies
-      const result = await this.page.evaluate(async (opts) => {
-        try {
-          const fetchOptions = {
-            method: opts.method,
-            headers: opts.headers,
-            credentials: 'include'
-          };
-          
-          if (opts.data) {
-            fetchOptions.body = opts.data;
-          }
-          
-          const response = await fetch(opts.url, fetchOptions);
-          const text = await response.text();
-          
-          let json = null;
-          try {
-            json = JSON.parse(text);
-          } catch (e) {
-            // Not JSON
-          }
-          
-          return {
-            status: response.status,
-            statusText: response.statusText,
-            headers: Object.fromEntries(response.headers.entries()),
-            body: text.slice(0, 5000),
-            json: json,
-            success: response.ok
-          };
-        } catch (e) {
-          return { error: e.message };
-        }
-      }, { url, method, headers: requestOptions.headers, data: requestOptions.data });
-      
-      if (result.error) {
-        return { status: 'error', message: result.error, url };
+      const mergedHeaders = {
+        'Content-Type': contentType,
+        ...authHeaders,
+        ...headers
+      };
+
+      // Add cookies if we have them and no Cookie header was explicitly set
+      if (cookieHeader && !mergedHeaders['Cookie'] && !mergedHeaders['cookie']) {
+        mergedHeaders['Cookie'] = cookieHeader;
       }
-      
+
+      const fetchOptions = {
+        method,
+        headers: mergedHeaders,
+        redirect: 'follow'
+      };
+
+      if (body && method !== 'GET') {
+        fetchOptions.body = typeof body === 'string' ? body : JSON.stringify(body);
+      }
+
+      // Use Node.js native fetch — no CORS restrictions, no page navigation required
+      const response = await fetch(url, fetchOptions);
+      const text = await response.text();
+
+      let json = null;
+      try {
+        json = JSON.parse(text);
+      } catch (e) { /* Not JSON */ }
+
       return {
         status: 'success',
         url,
         method,
-        httpStatus: result.status,
-        statusText: result.statusText,
-        body: result.body,
-        json: result.json,
-        responseSuccess: result.success,
+        httpStatus: response.status,
+        statusText: response.statusText,
+        headers: Object.fromEntries(response.headers.entries()),
+        body: text.slice(0, 5000),
+        json,
+        responseSuccess: response.ok,
         authInjected: useAuth && this.authManager.hasAuth()
       };
     } catch (e) {

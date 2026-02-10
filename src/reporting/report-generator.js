@@ -8,6 +8,9 @@ import chalk from 'chalk';
 export async function generateSarifReport(evidenceDir, outputPath, metadata = {}) {
   console.log(chalk.blue('📋 Generating SARIF report...'));
   
+  // Ensure evidence directory exists (may not if no findings were saved)
+  await fs.ensureDir(evidenceDir);
+  
   // Collect all evidence files
   const evidenceFiles = await fs.readdir(evidenceDir);
   const findings = [];
@@ -137,6 +140,9 @@ function getVulnerabilityDescription(cwe, type) {
  */
 export async function generateHtmlReport(evidenceDir, outputPath, metadata = {}) {
   console.log(chalk.blue('📋 Generating HTML report...'));
+  
+  // Ensure evidence directory exists (may not if no findings were saved)
+  await fs.ensureDir(evidenceDir);
   
   // Collect all evidence files
   const evidenceFiles = await fs.readdir(evidenceDir);
@@ -399,6 +405,7 @@ export async function generateDeveloperSummary(evidenceDir, outputPath) {
     findings = await fs.readJSON(summaryPath);
   } catch (e) {
     // Try to build from evidence files
+    await fs.ensureDir(evidenceDir);
     const evidenceFiles = await fs.readdir(evidenceDir);
     for (const file of evidenceFiles) {
       if (file.endsWith('.json') && file.startsWith('evidence-')) {

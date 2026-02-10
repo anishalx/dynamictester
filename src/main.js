@@ -154,18 +154,24 @@ async function main() {
     // Generate reports
     console.log(chalk.blue('\n📋 Generating reports...'));
     const evidenceDir = path.join(outputDir, 'evidence');
+    await fs.ensureDir(evidenceDir);
     
     try {
-      // Generate developer summary
       await generateDeveloperSummary(evidenceDir, path.join(outputDir, 'developer_summary.json'));
-      
-      // Generate SARIF report (for IDE integration)
+    } catch (reportError) {
+      console.log(chalk.yellow(`⚠️ Developer summary warning: ${reportError.message}`));
+    }
+    
+    try {
       await generateSarifReport(evidenceDir, path.join(outputDir, 'report.sarif.json'), { targetUrl });
-      
-      // Generate HTML report (for human review)
+    } catch (reportError) {
+      console.log(chalk.yellow(`⚠️ SARIF report warning: ${reportError.message}`));
+    }
+    
+    try {
       await generateHtmlReport(evidenceDir, path.join(outputDir, 'report.html'), { targetUrl });
     } catch (reportError) {
-      console.log(chalk.yellow(`⚠️ Report generation warning: ${reportError.message}`));
+      console.log(chalk.yellow(`⚠️ HTML report warning: ${reportError.message}`));
     }
     
     console.log(chalk.green.bold('\n🎉 Dynamic testing session complete!'));

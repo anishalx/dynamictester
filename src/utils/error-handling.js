@@ -76,18 +76,22 @@ export function isRateLimitError(error) {
 export function getRetryDelay(error, attempt) {
   // Rate limiting gets MUCH longer delays
   if (isRateLimitError(error)) {
-    // Attempt 1: 30 seconds
-    // Attempt 2: 40 seconds
-    // Attempt 3: 50 seconds
+    // Attempt 1: ~30 seconds
+    // Attempt 2: ~40 seconds
+    // Attempt 3: ~50 seconds
     // Maximum: 120 seconds (2 minutes)
-    return Math.min(30000 + (attempt * 10000), 120000);
+    const base = 20000 + (attempt * 10000);
+    const jitter = Math.random() * 5000; // 0-5s jitter to avoid thundering herd
+    return Math.min(base + jitter, 120000);
   }
 
   // Server errors get medium delays
   const message = (error.message || '').toLowerCase();
   if (message.includes('500') || message.includes('503') || message.includes('overloaded')) {
-    // 10s, 20s, 30s, max 60s
-    return Math.min(10000 * attempt, 60000);
+    // ~10s, ~20s, ~30s, max 60s
+    const base = 10000 * attempt;
+    const jitter = Math.random() * 2000; // 0-2s jitter
+    return Math.min(base + jitter, 60000);
   }
 
   // Exponential backoff with jitter for other retryable errors

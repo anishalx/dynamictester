@@ -24,6 +24,7 @@ export class RateLimiter {
     this.retryDelay = options.retryDelay || 5000; // 5 seconds between retries in parallel
     this.enableLogging = options.enableLogging !== false;
     this.errorLog = [];
+    this.retriedSuccessCount = 0;
   }
 
   /**
@@ -45,6 +46,11 @@ export class RateLimiter {
         
         if (attempt > 1 && this.enableLogging) {
           console.log(chalk.green(`   ✅ ${description} succeeded on attempt ${attempt}`));
+        }
+        
+        // Track successful retries
+        if (attempt > 1) {
+          this.retriedSuccessCount++;
         }
         
         return result;
@@ -133,12 +139,9 @@ export class RateLimiter {
 
             if (!isRetryableError(error)) {
               // Non-retryable error, fail immediately
-              throw { 
-                name: task.name, 
-                error: lastError, 
-                attempts,
-                retryable: false 
-              };
+              const err = new Error(`${task.name} failed with non-retryable error: ${lastError.message}`);
+              err.details = { name: task.name, error: lastError, attempts, retryable: false };
+              throw err;
             }
 
             if (attempts < maxAttempts) {
@@ -156,12 +159,9 @@ export class RateLimiter {
         }
 
         // All attempts exhausted
-        throw { 
-          name: task.name, 
-          error: lastError, 
-          attempts,
-          retryable: true 
-        };
+        const err = new Error(`${task.name} failed after ${attempts} attempts: ${lastError.message}`);
+        err.details = { name: task.name, error: lastError, attempts, retryable: true };
+        throw err;
       })
     );
 
@@ -179,12 +179,13 @@ export class RateLimiter {
         summary.results.push(result.value);
       } else {
         summary.failed++;
+        const details = result.reason.details || {};
         summary.results.push({
-          name: result.reason.name,
+          name: details.name || 'unknown',
           success: false,
-          error: result.reason.error?.message || 'Unknown error',
-          attempts: result.reason.attempts,
-          retryable: result.reason.retryable
+          error: details.error?.message || result.reason.message || 'Unknown error',
+          attempts: details.attempts,
+          retryable: details.retryable
         });
       }
     }
@@ -274,7 +275,7 @@ export class RateLimiter {
       total: this.errorLog.length,
       byType: {},
       rateLimitErrors: 0,
-      retriedSuccessfully: 0
+      retriedSuccessfully: this.retriedSuccessCount
     };
 
     for (const entry of this.errorLog) {
