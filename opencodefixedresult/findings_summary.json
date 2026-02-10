@@ -1,0 +1,32 @@
+[
+  {
+    "id": "javascript.audit.detect-replaceall-sanitization.detect-replaceall-sanitization",
+    "status": "CONFIRMED",
+    "file": "data/static/codefixes/restfulXssChallenge_2.ts",
+    "line": 62,
+    "type": "DOMXSS",
+    "cwe": "CWE-79",
+    "endpoint": "http://localhost:3000/data/static/codefixes/restfulXssChallenge_2.ts",
+    "success": true
+  },
+  {
+    "id": "javascript.browser.security.insecure-document-method.insecure-document-method",
+    "status": "CONFIRMED",
+    "file": "frontend/src/hacking-instructor/index.ts",
+    "line": 122,
+    "type": "ReflectedXSS",
+    "cwe": "CWE-79",
+    "endpoint": "http://localhost:3000/frontend/src/hacking-instructor/index.ts",
+    "success": true
+  },
+  {
+    "id": "html.security.audit.missing-integrity.missing-integrity",
+    "status": "CONFIRMED",
+    "file": "frontend/src/index.html",
+    "line": 14,
+    "type": "ReflectedXSS",
+    "cwe": "CWE-353",
+    "endpoint": "http://localhost:3000/frontend/src/index.html",
+    "success": true
+  }
+]

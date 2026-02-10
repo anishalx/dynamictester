@@ -1,0 +1,32 @@
+{
+  "generated": "2026-02-10T18:12:29.668Z",
+  "totals": {
+    "confirmed": 3,
+    "notExploitable": 0,
+    "total": 3
+  },
+  "confirmed": [
+    {
+      "file": "data/static/codefixes/restfulXssChallenge_2.ts",
+      "line": 62,
+      "type": "DOMXSS",
+      "cwe": "CWE-79",
+      "endpoint": "http://localhost:3000/data/static/codefixes/restfulXssChallenge_2.ts"
+    },
+    {
+      "file": "frontend/src/hacking-instructor/index.ts",
+      "line": 122,
+      "type": "ReflectedXSS",
+      "cwe": "CWE-79",
+      "endpoint": "http://localhost:3000/frontend/src/hacking-instructor/index.ts"
+    },
+    {
+      "file": "frontend/src/index.html",
+      "line": 14,
+      "type": "ReflectedXSS",
+      "cwe": "CWE-353",
+      "endpoint": "http://localhost:3000/frontend/src/index.html"
+    }
+  ],
+  "notExploitable": []
+}

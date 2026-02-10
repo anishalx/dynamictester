@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dynamic Security Test Report</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --success: #22c55e;
+      --error: #ef4444;
+      --warning: #f59e0b;
+      --border: #334155;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 2rem;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+    header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1.5rem;
+      margin-bottom: 2rem;
+    }
+    h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    .stats {
+      display: flex;
+      gap: 2rem;
+      margin-top: 1rem;
+    }
+    .stat {
+      background: var(--card);
+      padding: 1rem 1.5rem;
+      border-radius: 8px;
+      text-align: center;
+    }
+    .stat-value { font-size: 2rem; font-weight: 700; }
+    .stat-value.confirmed { color: var(--error); }
+    .stat-value.tested { color: var(--warning); }
+    .stat-label { color: var(--muted); font-size: 0.875rem; }
+    .findings { display: flex; flex-direction: column; gap: 1rem; }
+    .finding {
+      background: var(--card);
+      border-radius: 8px;
+      padding: 1.5rem;
+      border-left: 4px solid var(--border);
+    }
+    .finding.confirmed { border-left-color: var(--error); }
+    .finding-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 1rem;
+    }
+    .finding-title { font-weight: 600; font-size: 1.1rem; }
+    .badge {
+      padding: 0.25rem 0.75rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .badge.confirmed { background: var(--error); color: white; }
+    .badge.not-exploitable { background: var(--border); color: var(--muted); }
+    .location {
+      font-family: 'Fira Code', monospace;
+      background: var(--bg);
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      margin: 0.5rem 0;
+      font-size: 0.875rem;
+    }
+    .details { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-top: 1rem; }
+    .detail-item label { color: var(--muted); font-size: 0.75rem; display: block; }
+    .detail-item span { font-family: monospace; }
+    .payload {
+      background: var(--bg);
+      padding: 0.75rem;
+      border-radius: 4px;
+      font-family: monospace;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .proof { 
+      margin-top: 1rem;
+      padding: 1rem;
+      background: rgba(239, 68, 68, 0.1);
+      border-radius: 4px;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+    .remediation {
+      margin-top: 1rem;
+      padding: 1rem;
+      background: rgba(34, 197, 94, 0.1);
+      border-radius: 4px;
+      border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+    footer {
+      margin-top: 3rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      text-align: center;
+      font-size: 0.875rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🔒 Dynamic Security Test Report</h1>
+      <p style="color: var(--muted);">Generated: 2026-02-10T18:12:29.711Z</p>
+      <p style="color: var(--muted);">Target: http://localhost:3000</p>
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-value confirmed">3</div>
+          <div class="stat-label">Confirmed Vulnerabilities</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value tested">3</div>
+          <div class="stat-label">Total Tested</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value">0</div>
+          <div class="stat-label">Not Exploitable</div>
+        </div>
+      </div>
+    </header>
+    
+    <main>
+      <h2 style="margin-bottom: 1rem;">Findings</h2>
+      <div class="findings">
+        
+    <div class="finding confirmed">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">ReflectedXSS - CWE-353</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">html.security.audit.missing-integrity.missing-integrity</div>
+        </div>
+        <span class="badge confirmed">Confirmed</span>
+      </div>
+      
+      <div class="location">
+        📁 frontend/src/index.html:14:3
+      </div>
+      
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/frontend/src/index.html</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A08:2021 - Software and Data Integrity Failures</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-353</span>
+        </div>
+      </div>
+      
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">&lt;img src=x onerror=alert(1)&gt;</div>
+      </div>
+      
+      
+        <div class="proof">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">⚠️ Exploitation Proof</label>
+          <div>JavaScript alert executed.</div>
+        </div>
+      
+      
+      
+    </div>
+  
+
+    <div class="finding confirmed">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">DOMXSS - CWE-79</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">javascript.audit.detect-replaceall-sanitization.detect-replaceall-sanitization</div>
+        </div>
+        <span class="badge confirmed">Confirmed</span>
+      </div>
+      
+      <div class="location">
+        📁 data/static/codefixes/restfulXssChallenge_2.ts:62:34
+      </div>
+      
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/data/static/codefixes/restfulXssChallenge_2.ts</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A07:2017 - Cross-Site Scripting (XSS)</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-79</span>
+        </div>
+      </div>
+      
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">&lt;img src=x onerror=alert(1)&gt;</div>
+      </div>
+      
+      
+        <div class="proof">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">⚠️ Exploitation Proof</label>
+          <div>JavaScript alert executed.</div>
+        </div>
+      
+      
+      
+    </div>
+  
+
+    <div class="finding confirmed">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">ReflectedXSS - CWE-79</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">javascript.browser.security.insecure-document-method.insecure-document-method</div>
+        </div>
+        <span class="badge confirmed">Confirmed</span>
+      </div>
+      
+      <div class="location">
+        📁 frontend/src/hacking-instructor/index.ts:122:3
+      </div>
+      
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/frontend/src/hacking-instructor/index.ts</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A07:2017 - Cross-Site Scripting (XSS)</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-79</span>
+        </div>
+      </div>
+      
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">&lt;img src=x onerror=alert(1)&gt;</div>
+      </div>
+      
+      
+        <div class="proof">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">⚠️ Exploitation Proof</label>
+          <div>JavaScript alert executed.</div>
+        </div>
+      
+      
+      
+    </div>
+  
+      </div>
+    </main>
+    
+    <footer>
+      <p>Generated by Dynamic Security Tester</p>
+    </footer>
+  </div>
+</body>
+</html>
