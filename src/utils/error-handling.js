@@ -209,7 +209,9 @@ export function classifyError(error) {
   if ([500, 502, 503, 504].includes(status) ||
       /\b50[0234]\b/.test(message) ||
       /internal server error/i.test(message) ||
-      /service unavailable/i.test(message)) {
+      /service unavailable/i.test(message) ||
+      /\boverloaded\b/i.test(message) ||
+      /\bcapacity\b/i.test(message)) {
     return 'SERVER_ERROR';
   }
 

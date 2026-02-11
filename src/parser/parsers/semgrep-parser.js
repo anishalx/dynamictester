@@ -41,7 +41,7 @@ export class SemgrepParser extends BaseParser {
         severity: normalizeSeverity(finding.extra?.severity || 'ERROR'),
         confidence: normalizeConfidence(finding.extra?.metadata?.confidence || 'MEDIUM'),
         location: {
-          file: finding.path,
+          file: finding.path || 'unknown',
           line: finding.start?.line || 0,
           column: finding.start?.col || 0,
           endLine: finding.end?.line || 0,

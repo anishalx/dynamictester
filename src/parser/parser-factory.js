@@ -58,7 +58,7 @@ export function detectAnalyzerType(data) {
   }
   
   // OWASP Noir: has 'endpoints' array
-  if (data.endpoints !== undefined) {
+  if (data.endpoints && Array.isArray(data.endpoints)) {
     return 'noir';
   }
   

@@ -625,7 +625,7 @@ Use UNION SELECT with specific table/column names from fingerprinting`,
    */
   validatePayloads(payloads) {
     // Placeholder patterns that indicate hallucination
-    const hallucianationPatterns = [
+    const hallucinationPatterns = [
       /INSERT.*?PAYLOAD.*?HERE/i,
       /REPLACE.*?WITH.*?YOUR/i,
       /YOUR.*?SERVER.*?HERE/i,
@@ -633,7 +633,7 @@ Use UNION SELECT with specific table/column names from fingerprinting`,
       /CHANGE.*?THIS/i,
       /TODO:/i,
       /FIXME:/i,
-      /xxx{3,}/i,
+      /x{3,}/i,
       /^\s*test\s*$/i,
       /^\s*placeholder\s*$/i,
       /^\s*sample\s*$/i,
@@ -655,7 +655,7 @@ Use UNION SELECT with specific table/column names from fingerprinting`,
       if (payload.length > 1000) return false;
 
       // Skip if it matches hallucination patterns
-      for (const pattern of hallucianationPatterns) {
+      for (const pattern of hallucinationPatterns) {
         if (pattern.test(payload)) {
           return false;
         }

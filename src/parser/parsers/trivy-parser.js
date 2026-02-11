@@ -1,5 +1,5 @@
 import { BaseParser } from '../parser-interface.js';
-import { normalizeSeverity, normalizeConfidence } from '../normalizer.js';
+import { normalizeSeverity } from '../normalizer.js';
 
 /**
  * Parser for Trivy vulnerability scanner output
@@ -48,7 +48,10 @@ export class TrivyParser extends BaseParser {
           remediation: vuln.FixedVersion ? `Update ${vuln.PkgName} to version ${vuln.FixedVersion}` : 'No fix available',
           cwe: vuln.CweIDs || [],
           owasp: [],
-          cvss: vuln.CVSS ? Math.max(...Object.values(vuln.CVSS).map(c => c.V3Score || 0)) : null,
+          cvss: vuln.CVSS ? (() => {
+            const scores = Object.values(vuln.CVSS).map(c => c.V3Score || 0).filter(s => s > 0);
+            return scores.length > 0 ? Math.max(...scores) : null;
+          })() : null,
           cve: [vuln.VulnerabilityID],
           metadata: {
             pkgName: vuln.PkgName,
@@ -110,7 +113,7 @@ export class TrivyParser extends BaseParser {
           severity: normalizeSeverity(secret.Severity),
           confidence: 'HIGH',
           location: {
-            file: secret.Match || target,
+            file: target,
             line: secret.StartLine || 0,
             column: 0,
             endLine: secret.EndLine || 0,

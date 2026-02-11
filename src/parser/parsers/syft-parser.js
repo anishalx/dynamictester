@@ -1,5 +1,5 @@
 import { BaseParser } from '../parser-interface.js';
-import { normalizeSeverity, normalizeConfidence } from '../normalizer.js';
+import { normalizeSeverity } from '../normalizer.js';
 
 /**
  * Parser for Syft SBOM (Software Bill of Materials) output

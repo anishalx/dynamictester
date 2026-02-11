@@ -10,6 +10,10 @@
 export function validateVulnerability(vuln) {
   const errors = [];
 
+  if (!vuln || typeof vuln !== 'object') {
+    return { valid: false, errors: ['Vulnerability must be a non-null object'] };
+  }
+
   // Check required fields
   const required = ['id', 'source', 'type', 'severity', 'location', 'description'];
   for (const field of required) {

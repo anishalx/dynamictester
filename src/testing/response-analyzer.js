@@ -103,7 +103,7 @@ export class ResponseAnalyzer {
       statusDifference: statusDiff,
       confidence,
       details: {
-        trueLeng: trueBody.length,
+        trueLength: trueBody.length,
         falseLength: falseBody.length,
         trueStatus: trueResponse.status,
         falseStatus: falseResponse.status
@@ -198,7 +198,10 @@ export class ResponseAnalyzer {
 
     for (const [waf, patterns] of Object.entries(wafPatterns)) {
       for (const pattern of patterns) {
-        if (pattern.test(bodyText) || pattern.test(response.headers?.toString() || '')) {
+        const headerText = response.headers
+            ? Object.entries(response.headers).map(([k, v]) => `${k}: ${v}`).join(' ')
+            : '';
+        if (pattern.test(bodyText) || pattern.test(headerText)) {
           return {
             detected: true,
             waf,

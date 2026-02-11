@@ -294,7 +294,7 @@ export class BrowserManager {
             id: btn.id || null,
             selector: btn.id ? `#${btn.id}` : 
                       btn.type === 'submit' ? '[type="submit"]' :
-                      btn.className ? `button.${btn.className.split(' ')[0]}` : null
+                      btn.className ? `${btn.tagName.toLowerCase()}.${btn.className.split(' ')[0]}` : null
           }))
           .filter(b => b.selector);
       });

@@ -106,7 +106,7 @@ async function main() {
         // Show vulnerability summary
         for (let i = 0; i < Math.min(queue.length, 5); i++) {
           const v = queue[i];
-          console.log(chalk.gray(`   ${i + 1}. ${v.vulnerabilityType} in ${v.source}`));
+          console.log(chalk.gray(`   ${i + 1}. ${v.vulnerabilityType} in ${v.location}`));
         }
         if (queue.length > 5) {
           console.log(chalk.gray(`   ... and ${queue.length - 5} more`));

@@ -285,7 +285,7 @@ export async function generateHtmlReport(evidenceDir, outputPath, metadata = {})
     <header>
       <h1>🔒 Dynamic Security Test Report</h1>
       <p style="color: var(--muted);">Generated: ${new Date().toISOString()}</p>
-      <p style="color: var(--muted);">Target: ${metadata.targetUrl || 'N/A'}</p>
+      <p style="color: var(--muted);">Target: ${escapeHtml(metadata.targetUrl || 'N/A')}</p>
       <div class="stats">
         <div class="stat">
           <div class="stat-value confirmed">${confirmedCount}</div>
@@ -331,32 +331,32 @@ function generateFindingHtml(finding) {
     <div class="finding ${isConfirmed ? 'confirmed' : ''}">
       <div class="finding-header">
         <div>
-          <div class="finding-title">${finding.vulnerability?.type || 'Unknown'} - ${finding.vulnerability?.cwe || 'N/A'}</div>
-          <div style="color: var(--muted); font-size: 0.875rem;">${finding.findingId || 'N/A'}</div>
+          <div class="finding-title">${escapeHtml(finding.vulnerability?.type || 'Unknown')} - ${escapeHtml(finding.vulnerability?.cwe || 'N/A')}</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">${escapeHtml(finding.findingId || 'N/A')}</div>
         </div>
         <span class="badge ${badgeClass}">${badgeText}</span>
       </div>
       
       <div class="location">
-        📁 ${finding.sourceLocation?.file || 'Unknown'}:${finding.sourceLocation?.line || '?'}:${finding.sourceLocation?.column || '?'}
+        📁 ${escapeHtml(finding.sourceLocation?.file || 'Unknown')}:${escapeHtml(String(finding.sourceLocation?.line || '?'))}:${escapeHtml(String(finding.sourceLocation?.column || '?'))}
       </div>
       
       <div class="details">
         <div class="detail-item">
           <label>Endpoint</label>
-          <span>${finding.exploitation?.endpoint || 'N/A'}</span>
+          <span>${escapeHtml(finding.exploitation?.endpoint || 'N/A')}</span>
         </div>
         <div class="detail-item">
           <label>Method</label>
-          <span>${finding.exploitation?.method || 'N/A'}</span>
+          <span>${escapeHtml(finding.exploitation?.method || 'N/A')}</span>
         </div>
         <div class="detail-item">
           <label>OWASP</label>
-          <span>${finding.vulnerability?.owasp || 'N/A'}</span>
+          <span>${escapeHtml(finding.vulnerability?.owasp || 'N/A')}</span>
         </div>
         <div class="detail-item">
           <label>CWE</label>
-          <span>${finding.vulnerability?.cwe || 'N/A'}</span>
+          <span>${escapeHtml(finding.vulnerability?.cwe || 'N/A')}</span>
         </div>
       </div>
       

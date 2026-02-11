@@ -59,13 +59,16 @@ export class BypassEngine {
     const blockedSet = new Set(this.blockedPayloads.map(b => b.payload));
     const freshBypasses = allBypasses.filter(b => !blockedSet.has(b));
 
-    this.attemptCount += freshBypasses.length;
+    // Compute how many bypasses we can actually return
+    const remaining = Math.max(0, this.maxAttempts - this.attemptCount);
+    const result = freshBypasses.slice(0, remaining);
+    this.attemptCount += result.length;
 
     // Build guidance for the LLM
     const guidance = this._buildBypassGuidance(blockingContext, techContext, vulnType);
 
     return {
-      bypasses: freshBypasses.slice(0, this.maxAttempts - this.attemptCount + freshBypasses.length),
+      bypasses: result,
       guidance,
       techniques: this._describeAppliedTechniques(blockingContext, vulnType),
       blockedHistory: this.blockedPayloads.slice(-5).map(b => b.payload),

@@ -1,5 +1,4 @@
 import { BaseParser } from '../parser-interface.js';
-import { normalizeSeverity, normalizeConfidence } from '../normalizer.js';
 
 /**
  * Parser for Gitleaks secret scanner output
@@ -16,7 +15,6 @@ export class GitleaksParser extends BaseParser {
     if (data && Array.isArray(data.Findings)) return true;
     // Empty results are valid
     if (Array.isArray(data) && data.length === 0) return true;
-    if (data && Array.isArray(data.Findings) && data.Findings.length === 0) return true;
     return false;
   }
 
@@ -80,9 +78,8 @@ export class GitleaksParser extends BaseParser {
     if (rid.includes('gitlab')) return 'GitLabToken';
     if (rid.includes('slack')) return 'SlackToken';
     if (rid.includes('jwt')) return 'JWT';
-    if (rid.includes('api') || rid.includes('key')) return 'APIKey';
-    if (rid.includes('password')) return 'Password';
     if (rid.includes('private') && rid.includes('key')) return 'PrivateKey';
+    if (rid.includes('api') || rid.includes('key')) return 'APIKey';
     if (rid.includes('generic')) return 'GenericSecret';
     return 'HardcodedSecret';
   }

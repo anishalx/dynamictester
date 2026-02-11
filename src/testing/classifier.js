@@ -25,6 +25,20 @@ export class VulnerabilityClassifier {
    * @returns {object} Classification decision
    */
   static classify(testResult) {
+    if (!testResult || !testResult.evidence) {
+      return {
+        classification: 'NOT_REPRODUCIBLE',
+        level: 0,
+        levelName: 'No Exploitation',
+        confidence: 'N/A',
+        reason: 'No test result or evidence provided',
+        evidence: testResult?.evidence || {},
+        includeInReport: false,
+        requiresAction: false,
+        ciExitCode: 0
+      };
+    }
+
     const level = determineLevel(testResult.evidence);
     const levelDetails = getLevelDetails(level);
     

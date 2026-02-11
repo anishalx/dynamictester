@@ -26,6 +26,7 @@ export async function generateExploitationQueue(vulnerabilities, outputDir) {
       queues[queueType] = [];
     }
     
+    const loc = vuln.location || {};
     queues[queueType].push({
       id: vuln.id,
       source: vuln.source, // Track which analyzer found it
@@ -34,11 +35,11 @@ export async function generateExploitationQueue(vulnerabilities, outputDir) {
       verdict: 'vulnerable',
       confidence: vuln.confidence,
       vulnerabilityType: vuln.subType || queueType,
-      location: `${vuln.location.file}:${vuln.location.line}`,
-      file: vuln.location.file,
-      line: vuln.location.line,
-      column: vuln.location.column,
-      snippet: vuln.location.snippet,
+      location: `${loc.file || 'unknown'}:${loc.line || 0}`,
+      file: loc.file || 'unknown',
+      line: loc.line || 0,
+      column: loc.column || 0,
+      snippet: loc.snippet || '',
       description: vuln.description,
       remediation: vuln.remediation,
       cwe: vuln.cwe,

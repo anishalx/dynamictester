@@ -1,5 +1,5 @@
 import { BaseParser } from '../parser-interface.js';
-import { normalizeSeverity, normalizeConfidence } from '../normalizer.js';
+import { normalizeSeverity } from '../normalizer.js';
 
 /**
  * Parser for OSV (Open Source Vulnerabilities) scanner output
@@ -62,16 +62,21 @@ export class OsvParser extends BaseParser {
     } else if (vuln.severity) {
       // OSV severity format: [{ type: "CVSS_V3", score: "CVSS:3.1/..." }]
       for (const sev of vuln.severity || []) {
-        if (sev.score && sev.score.startsWith('CVSS:')) {
-          // Extract base score from CVSS vector
-          const match = sev.score.match(/(\d+\.\d+)/);
-          if (match) {
-            cvssScore = parseFloat(match[1]);
-            if (cvssScore >= 9.0) severity = 'CRITICAL';
-            else if (cvssScore >= 7.0) severity = 'HIGH';
-            else if (cvssScore >= 4.0) severity = 'MEDIUM';
-            else severity = 'LOW';
-          }
+        if (sev.type === 'CVSS_V3' && typeof sev.baseScore === 'number') {
+          // Use explicit base score if provided
+          cvssScore = sev.baseScore;
+        } else if (sev.score && !sev.score.startsWith('CVSS:')) {
+          // Numeric score provided directly (not a vector string)
+          cvssScore = parseFloat(sev.score);
+        }
+        // Note: CVSS vector strings (e.g. "CVSS:3.1/AV:N/...") do not contain
+        // the numeric base score — they require a CVSS calculator to derive it.
+        // We skip vector-only entries and fall through to database_specific.severity.
+        if (cvssScore !== null && !isNaN(cvssScore)) {
+          if (cvssScore >= 9.0) severity = 'CRITICAL';
+          else if (cvssScore >= 7.0) severity = 'HIGH';
+          else if (cvssScore >= 4.0) severity = 'MEDIUM';
+          else severity = 'LOW';
         }
       }
     }

@@ -1,7 +1,7 @@
 import { fs } from 'zx';
 import chalk from 'chalk';
 import { detectAnalyzerType, createParser } from './parser-factory.js';
-import { validateVulnerabilities, checkDuplicates } from './validator.js';
+import { validateVulnerabilities } from './validator.js';
 
 /**
  * Parse static analyzer result file(s) - supports multiple formats

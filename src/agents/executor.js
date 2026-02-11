@@ -23,14 +23,17 @@ const MAX_TOOL_RESULT_LENGTH = 8000;
  * Truncate a string to a maximum length
  */
 function truncateResult(obj, maxLen = MAX_TOOL_RESULT_LENGTH) {
+  if (obj === undefined || obj === null) {
+    return JSON.stringify({ status: 'success', result: obj ?? null });
+  }
   const str = JSON.stringify(obj);
   if (str.length <= maxLen) return str;
   
   // Try to return a meaningful truncated version
-  if (obj.content) {
+  if (typeof obj.content === 'string') {
     return JSON.stringify({ ...obj, content: obj.content.slice(0, maxLen - 500) + '... [TRUNCATED]' });
   }
-  if (obj.text) {
+  if (typeof obj.text === 'string') {
     return JSON.stringify({ ...obj, text: obj.text.slice(0, maxLen - 500) + '... [TRUNCATED]' });
   }
   
@@ -659,7 +662,7 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
 
   // Build initial user message with queue summary
   const vulnSummary = queueData.vulnerabilities?.slice(0, 5).map((v, i) => 
-    `${i + 1}. ${v.vulnerabilityType} at ${v.source}`
+    `${i + 1}. ${v.vulnerabilityType} at ${v.location}`
   ).join('\n') || 'No vulnerabilities loaded';
 
   const messages = [

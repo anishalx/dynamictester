@@ -70,6 +70,9 @@ export class CodeQLParser extends BaseParser {
           cwe
         });
 
+        const precision = rule.properties?.precision || 'medium';
+        const mappedConfidence = precision === 'very-high' ? 'HIGH' : precision;
+
         vulnerabilities.push({
           id: `CODEQL-${ruleId}-${file}-${region.startLine}`,
           source: 'codeql',
@@ -77,7 +80,7 @@ export class CodeQLParser extends BaseParser {
           type,
           subType,
           severity: normalizeSeverity(severity),
-          confidence: normalizeConfidence(rule.properties?.precision || 'MEDIUM'),
+          confidence: normalizeConfidence(mappedConfidence),
           location: {
             file: file ?? 'unknown',
             line: region.startLine ?? 0,

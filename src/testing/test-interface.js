@@ -90,7 +90,7 @@ export class VulnerabilityTester {
   /**
    * Generate test report
    * @param {object} result - Test result
-   * @returns {string} Formatted report
+   * @returns {object} Formatted report
    */
   generateReport(result) {
     const classification = this.classify(result.evidence);

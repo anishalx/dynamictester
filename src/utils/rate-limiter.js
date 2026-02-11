@@ -21,9 +21,9 @@ import {
  */
 export class RateLimiter {
   constructor(options = {}) {
-    this.maxRetries = options.maxRetries || 3;
-    this.staggerDelay = options.staggerDelay || 2000; // 2 seconds between parallel starts
-    this.retryDelay = options.retryDelay || 5000; // 5 seconds between retries in parallel
+    this.maxRetries = options.maxRetries ?? 3;
+    this.staggerDelay = options.staggerDelay ?? 2000; // 2 seconds between parallel starts
+    this.retryDelay = options.retryDelay ?? 5000; // 5 seconds between retries in parallel
     this.enableLogging = options.enableLogging !== false;
     this.errorLog = [];
     this.retriedSuccessCount = 0;
@@ -40,7 +40,7 @@ export class RateLimiter {
    * @throws {Error} If all retries are exhausted or a non-retryable error occurs
    */
   async executeWithRetry(fn, description = 'Operation', options = {}) {
-    const maxRetries = options.maxRetries || this.maxRetries;
+    const maxRetries = options.maxRetries ?? this.maxRetries;
 
     // Guard: maxRetries must be at least 1 so the function executes at least once
     if (maxRetries < 1) {
@@ -111,9 +111,9 @@ export class RateLimiter {
    * @returns {Promise<object>} Summary with results array
    */
   async executeParallelWithStagger(tasks, options = {}) {
-    const staggerDelay = options.staggerDelay || this.staggerDelay;
-    const retryDelay = options.retryDelay || this.retryDelay;
-    const maxAttempts = options.maxAttempts || this.maxRetries;
+    const staggerDelay = options.staggerDelay ?? this.staggerDelay;
+    const retryDelay = options.retryDelay ?? this.retryDelay;
+    const maxAttempts = options.maxAttempts ?? this.maxRetries;
 
     if (this.enableLogging) {
       console.log(chalk.cyan(`\n🚀 Starting ${tasks.length} parallel tasks with ${staggerDelay}ms stagger...`));

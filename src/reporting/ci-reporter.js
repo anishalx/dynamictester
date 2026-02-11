@@ -23,7 +23,7 @@ export class CIReporter {
       const findings = [];
 
       for (const file of evidenceFiles) {
-        if (file.endsWith('.json')) {
+        if (file.endsWith('.json') && file.startsWith('evidence-')) {
           const content = await fs.readFile(path.join(evidenceDir, file), 'utf-8');
           try {
             const finding = JSON.parse(content);
@@ -160,6 +160,9 @@ export class CIReporter {
     }
     if (summary.likely > 0) {
       return `FAIL: ${summary.likely} LIKELY exploit(s) found (--fail-on-likely enabled)`;
+    }
+    if (summary.blocked > 0) {
+      return `FAIL: ${summary.blocked} BLOCKED test(s) (--fail-on-blocked enabled)`;
     }
     return `FAIL: Unknown reason`;
   }

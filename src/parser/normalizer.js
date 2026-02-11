@@ -36,10 +36,11 @@ export function normalizeConfidence(confidence) {
  * @returns {{type: string, subType: string}}
  */
 export function categorizeVulnerability(vuln) {
+  const cweArr = Array.isArray(vuln.cwe) ? vuln.cwe : (vuln.cwe ? [vuln.cwe] : []);
   const indicators = [
     vuln.description?.toLowerCase() || '',
     vuln.checkId?.toLowerCase() || '',
-    vuln.cwe?.join(' ') || '',
+    cweArr.join(' ').toLowerCase(),
     vuln.metadata?.vulnerability_class?.join(' ')?.toLowerCase() || ''
   ].join(' ');
 

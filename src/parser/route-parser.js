@@ -298,6 +298,8 @@ export function enrichWithRouteInfo(vulnerabilities, routeMapping) {
   return vulnerabilities.map(vuln => {
     const enriched = { ...vuln };
     
+    if (!vuln.file) return enriched;
+
     // Try to find matching routes
     const matchingRoutes = routeMapping.routes.filter(route => {
       const fileMatch = route.file.includes(vuln.file) || vuln.file.includes(route.file);
