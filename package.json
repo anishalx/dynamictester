@@ -11,12 +11,14 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@browserbasehq/stagehand": "^3.0.8",
     "axios": "^1.13.2",
     "chalk": "^4.1.2",
     "inquirer": "^9.3.8",
     "js-yaml": "^4.1.1",
     "openai": "^6.15.0",
     "playwright": "^1.57.0",
+    "zod": "^4.3.6",
     "zx": "^8.8.5"
   },
   "devDependencies": {

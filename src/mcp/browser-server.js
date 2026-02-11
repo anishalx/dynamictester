@@ -7,17 +7,32 @@ const SHORT_TIMEOUT = 2000; // 2 seconds for quick checks
 
 /**
  * Browser automation tools for the LLM
- * Enhanced with better error handling, element visibility checks, and auth propagation
+ * Enhanced with better error handling, element visibility checks, and auth propagation.
+ *
+ * Supports two modes:
+ * 1. Self-managed: Launches its own Chromium browser (default, original behavior).
+ * 2. Externally-managed: Receives page/context from Stagehand (or any external source).
+ *    In this mode, ensureBrowser() is a no-op and close() does NOT close the browser.
+ *
+ * @param {object} [options]
+ * @param {import('playwright-core').Page} [options.page] - External Playwright page
+ * @param {object} [options.context] - External browser context (Playwright or V3Context)
+ * @param {import('playwright-core').Browser} [options.browser] - External browser instance
  */
 export class BrowserManager {
-  constructor() {
-    this.browser = null;
-    this.context = null;
-    this.page = null;
+  constructor(options = {}) {
+    this.browser = options.browser || null;
+    this.context = options.context || null;
+    this.page = options.page || null;
+    this._externallyManaged = !!(options.page || options.context);
     this.authManager = getAuthManager();
   }
 
   async ensureBrowser() {
+    // If externally managed (e.g. Stagehand), skip browser launch
+    if (this._externallyManaged && this.page) {
+      return;
+    }
     if (!this.browser) {
       this.browser = await chromium.launch({ headless: true });
       this.context = await this.browser.newContext({
@@ -489,7 +504,21 @@ export class BrowserManager {
       }, AuthManager.JWT_STORAGE_KEYS);
 
       // Extract cookies from browser context
-      const cookies = await this.context.cookies();
+      let cookies = [];
+      try {
+        if (typeof this.context.cookies === 'function') {
+          cookies = await this.context.cookies();
+        } else if (this.page) {
+          // Fallback: parse document.cookie for Stagehand/V3Context
+          const cookieStr = await this.page.evaluate(() => document.cookie).catch(() => '');
+          if (cookieStr) {
+            cookies = cookieStr.split(';').map(c => {
+              const [name, ...rest] = c.trim().split('=');
+              return { name: name.trim(), value: rest.join('=').trim() };
+            }).filter(c => c.name);
+          }
+        }
+      } catch (e) { /* Context not ready */ }
       
       // Store tokens in AuthManager
       let jwtFound = false;
@@ -555,9 +584,18 @@ export class BrowserManager {
       let cookieHeader = '';
       if (this.context) {
         try {
-          const cookies = await this.context.cookies();
-          if (cookies.length > 0) {
-            cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+          // Playwright BrowserContext has .cookies(); Stagehand V3Context does not.
+          if (typeof this.context.cookies === 'function') {
+            const cookies = await this.context.cookies();
+            if (cookies.length > 0) {
+              cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+            }
+          } else if (this.page) {
+            // Fallback: extract via CDP through the page
+            const cdpCookies = await this.page.evaluate(() => document.cookie).catch(() => '');
+            if (cdpCookies) {
+              cookieHeader = cdpCookies;
+            }
           }
         } catch (e) { /* Browser context not ready yet */ }
       }
@@ -634,6 +672,13 @@ export class BrowserManager {
   }
 
   async close() {
+    if (this._externallyManaged) {
+      // Do NOT close the browser — Stagehand owns the lifecycle
+      this.page = null;
+      this.context = null;
+      this.browser = null;
+      return { status: 'success', note: 'externally managed — browser not closed' };
+    }
     if (this.browser) {
       await this.browser.close();
       this.browser = null;

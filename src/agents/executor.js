@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { fs, path } from 'zx';
 import chalk from 'chalk';
 import { BrowserManager } from '../mcp/browser-server.js';
+import { StagehandManager } from '../mcp/stagehand-manager.js';
 import { 
   RateLimiter, 
   isRetryableError, 
@@ -125,9 +126,51 @@ TOOL USAGE:
 - generate_bypasses: Call when payload is BLOCKED (returns bypass variations)
 - browser_http_request: PREFERRED for API testing
 - browser_force_click: Use when normal click times out
-- save_evidence: Include full source mapping (file, line, column)`;
+- save_evidence: Include full source mapping (file, line, column)
+
+AI BROWSER TOOLS (Stagehand):
+- stagehand_act: AI-powered click/fill/interact — use when exact CSS selectors are unknown or page is dynamic/SPA
+- stagehand_extract: AI-powered data extraction — use to parse complex pages, extract error messages or form structures
+- stagehand_observe: AI-powered element discovery — use to map attack surface on unfamiliar pages, find injection points
+- stagehand_agent: AI-powered multi-step workflow — use for login sequences, multi-page flows, CSRF token harvesting
+
+WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
+- Use browser_http_request for direct API/REST testing (fastest, no browser needed)
+- Use browser_click/browser_fill when you HAVE exact CSS selectors
+- Use stagehand_act when selectors are unknown, elements are dynamic, or previous browser_click/fill failed
+- Use stagehand_extract to intelligently parse complex response pages
+- Use stagehand_observe to discover interactive elements on unfamiliar pages`;
   
-  const browserManager = new BrowserManager();
+  // ---------------------------------------------------------------------------
+  // Initialize Stagehand (AI browser) → pass page/context to BrowserManager
+  // ---------------------------------------------------------------------------
+  const stagehandManager = new StagehandManager();
+  let browserManager;
+
+  try {
+    console.log(chalk.gray('   Initializing Stagehand AI browser...'));
+    await stagehandManager.init();
+    const stagehandPage = stagehandManager.getPage();
+    const stagehandContext = stagehandManager.getContext();
+
+    if (stagehandPage && stagehandContext) {
+      // Stagehand owns the browser — BrowserManager uses its page/context
+      browserManager = new BrowserManager({
+        page: stagehandPage,
+        context: stagehandContext
+      });
+      console.log(chalk.green('   Stagehand initialized — browser shared with BrowserManager'));
+    } else {
+      // Stagehand init succeeded but no page available — fall back
+      console.log(chalk.yellow('   Stagehand page not available — falling back to standalone browser'));
+      browserManager = new BrowserManager();
+    }
+  } catch (stagehandError) {
+    // Stagehand failed to initialize — fall back to standalone BrowserManager
+    console.log(chalk.yellow(`   Stagehand init failed: ${stagehandError.message}`));
+    console.log(chalk.yellow('   Falling back to standalone Playwright browser'));
+    browserManager = new BrowserManager();
+  }
   
   // Initialize testing utilities (shared across all tool calls within this agent)
   const payloadGenerator = new PayloadGenerator(model);
@@ -459,9 +502,18 @@ TOOL USAGE:
   }
 
   const browserTools = browserManager.getTools();
+  const stagehandTools = stagehandManager.getTools();
   
   const tools = [
     ...browserTools.map(t => ({
+      type: 'function',
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters
+      }
+    })),
+    ...stagehandTools.map(t => ({
       type: 'function',
       function: {
         name: t.name,
@@ -602,7 +654,8 @@ TOOL USAGE:
     generate_payloads,
     analyze_response,
     generate_bypasses,
-    ...Object.fromEntries(browserTools.map(t => [t.name, t.handler]))
+    ...Object.fromEntries(browserTools.map(t => [t.name, t.handler])),
+    ...Object.fromEntries(stagehandTools.map(t => [t.name, t.handler]))
   };
 
   // Build initial user message with queue summary
@@ -735,6 +788,7 @@ TOOL USAGE:
     }
 
     await browserManager.close();
+    await stagehandManager.close();
     
     // Log error stats if any
     const errorStats = rateLimiter.getErrorStats();
@@ -756,6 +810,7 @@ TOOL USAGE:
   } catch (error) {
     console.error(chalk.red(`❌ Agent failed: ${error.message}`));
     await browserManager.close();
+    await stagehandManager.close();
     return {
       success: false,
       error: error.message,
