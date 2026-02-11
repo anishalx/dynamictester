@@ -1,8 +1,0 @@
-{
-  "id": "javascript.express.security.audit.express-open-redirect.express-open-redirect",
-  "type": "OpenRedirect",
-  "evidence": "The application returned an error message \"Unrecognized target URL for redirect\" for attempted redirects to \"http://malicious.com\" and \"http://example.com\", indicating some URL validation exists.",
-  "payload": "/redirect?to=http://malicious.com",
-  "success": false,
-  "timestamp": "2026-01-15T18:17:00.687Z"
-}

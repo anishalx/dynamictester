@@ -3,3 +3,8 @@ testoutput/
 static-analyzer-results/
 node_modules/
 .env
+/PROJECT_REPORT.md
+/AGENTS.md
+/EXPLANATION.md
+/MULTI_ANALYZER_USAGE.md
+output*

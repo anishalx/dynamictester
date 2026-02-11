@@ -1,8 +1,0 @@
-{
-  "id": "javascript.sequelize.security.audit.sequelize-injection-express.express-sequelize-injection",
-  "type": "SQLi",
-  "evidence": "Attempted time-based SQL Injection with payload ''; WAITFOR DELAY '00:00:05'--'. Detected challenge solution message indicating response delay manipulation potential but ended with 'Invalid email or password.'",
-  "payload": "'; WAITFOR DELAY '00:00:05'--",
-  "success": false,
-  "timestamp": "2026-01-15T18:05:25.865Z"
-}
