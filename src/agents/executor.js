@@ -5,9 +5,7 @@ import { BrowserManager } from '../mcp/browser-server.js';
 import { StagehandManager } from '../mcp/stagehand-manager.js';
 import { 
   RateLimiter, 
-  isRetryableError, 
   isRateLimitError, 
-  getRetryDelay, 
   formatDelay,
   sleep 
 } from '../utils/rate-limiter.js';
@@ -30,12 +28,10 @@ function truncateResult(obj, maxLen = MAX_TOOL_RESULT_LENGTH) {
   
   // Try to return a meaningful truncated version
   if (obj.content) {
-    obj.content = obj.content.slice(0, maxLen - 500) + '... [TRUNCATED]';
-    return JSON.stringify(obj);
+    return JSON.stringify({ ...obj, content: obj.content.slice(0, maxLen - 500) + '... [TRUNCATED]' });
   }
   if (obj.text) {
-    obj.text = obj.text.slice(0, maxLen - 500) + '... [TRUNCATED]';
-    return JSON.stringify(obj);
+    return JSON.stringify({ ...obj, text: obj.text.slice(0, maxLen - 500) + '... [TRUNCATED]' });
   }
   
   return str.slice(0, maxLen) + '... [TRUNCATED]';
@@ -152,16 +148,19 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
     await stagehandManager.init();
     const stagehandPage = stagehandManager.getPage();
     const stagehandContext = stagehandManager.getContext();
+    const stagehandBrowser = stagehandManager.getBrowser();
 
     if (stagehandPage && stagehandContext) {
-      // Stagehand owns the browser — BrowserManager uses its page/context
+      // Stagehand owns the browser process; BrowserManager uses the CDP-connected
+      // Playwright page/context/browser for full API compatibility.
       browserManager = new BrowserManager({
         page: stagehandPage,
-        context: stagehandContext
+        context: stagehandContext,
+        browser: stagehandBrowser
       });
-      console.log(chalk.green('   Stagehand initialized — browser shared with BrowserManager'));
+      console.log(chalk.green('   Stagehand initialized — CDP browser shared with BrowserManager'));
     } else {
-      // Stagehand init succeeded but no page available — fall back
+      // Stagehand init succeeded but CDP connection failed — fall back
       console.log(chalk.yellow('   Stagehand page not available — falling back to standalone browser'));
       browserManager = new BrowserManager();
     }
@@ -719,6 +718,13 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
         continue; // Try next turn
       }
 
+      // Guard against empty response (e.g., content filter refusal)
+      if (!response.choices || response.choices.length === 0) {
+        console.log(chalk.yellow('   ⚠️ Empty response from API, retrying...'));
+        consecutiveErrors++;
+        continue;
+      }
+
       const assistantMessage = response.choices[0].message;
       messages.push(assistantMessage);
 
@@ -787,9 +793,6 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
       console.log(chalk.yellow(`\n   ⚠️ Reached maximum turns (${maxTurns})`));
     }
 
-    await browserManager.close();
-    await stagehandManager.close();
-    
     // Log error stats if any
     const errorStats = rateLimiter.getErrorStats();
     if (errorStats.total > 0) {
@@ -809,13 +812,14 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
     
   } catch (error) {
     console.error(chalk.red(`❌ Agent failed: ${error.message}`));
-    await browserManager.close();
-    await stagehandManager.close();
     return {
       success: false,
       error: error.message,
       errorStats: rateLimiter.getErrorStats()
     };
+  } finally {
+    try { await browserManager.close(); } catch (e) { /* cleanup error */ }
+    try { await stagehandManager.close(); } catch (e) { /* cleanup error */ }
   }
 }
 

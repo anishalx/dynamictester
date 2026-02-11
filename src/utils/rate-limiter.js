@@ -1,21 +1,23 @@
 import chalk from 'chalk';
-import { 
-  isRetryableError, 
-  isRateLimitError, 
-  getRetryDelay, 
-  formatDelay, 
-  sleep, 
-  classifyError 
+import {
+  isRetryableError,
+  isRateLimitError,
+  getRetryDelay,
+  formatDelay,
+  sleep,
+  classifyError,
+  parseRetryAfter
 } from './error-handling.js';
 
 /**
- * Rate Limiter - Shannon-style API rate limit management
- * 
+ * Rate Limiter — API rate limit management with intelligent retry
+ *
  * Features:
  * - Intelligent retry with exponential backoff
- * - Rate limit-specific longer delays (30s → 40s → 50s)
+ * - Rate limit-specific longer delays (30s → 40s → 50s) with Retry-After support
  * - Staggered parallel execution
  * - Fault-tolerant Promise.allSettled pattern
+ * - Accurate delay logging (delay computed once, shared between log and sleep)
  */
 export class RateLimiter {
   constructor(options = {}) {
@@ -28,40 +30,45 @@ export class RateLimiter {
   }
 
   /**
-   * Execute a function with retry logic
-   * Uses exponential backoff with rate limit-specific delays
-   * 
+   * Execute a function with retry logic.
+   * Uses exponential backoff with rate limit-specific delays.
+   *
    * @param {Function} fn - Async function to execute
    * @param {string} description - Description for logging
    * @param {object} options - Additional options
    * @returns {Promise<any>} Result of the function
+   * @throws {Error} If all retries are exhausted or a non-retryable error occurs
    */
   async executeWithRetry(fn, description = 'Operation', options = {}) {
     const maxRetries = options.maxRetries || this.maxRetries;
+
+    // Guard: maxRetries must be at least 1 so the function executes at least once
+    if (maxRetries < 1) {
+      throw new Error(`executeWithRetry: maxRetries must be >= 1, got ${maxRetries}`);
+    }
+
     let lastError;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         const result = await fn();
-        
+
         if (attempt > 1 && this.enableLogging) {
           console.log(chalk.green(`   ✅ ${description} succeeded on attempt ${attempt}`));
         }
-        
+
         // Track successful retries
         if (attempt > 1) {
           this.retriedSuccessCount++;
         }
-        
+
         return result;
       } catch (error) {
         lastError = error;
-        
-        // Log the error
-        this._logError(error, description, attempt, maxRetries);
 
         // Check if error is retryable
         if (!isRetryableError(error)) {
+          this._logError(error, description, attempt, maxRetries, null);
           if (this.enableLogging) {
             console.log(chalk.red(`   ❌ ${description} failed with non-retryable error: ${error.message}`));
           }
@@ -70,8 +77,10 @@ export class RateLimiter {
 
         // If we have retries left, wait and retry
         if (attempt < maxRetries) {
+          // Compute delay ONCE — use same value for logging and sleeping
           const delay = getRetryDelay(error, attempt);
-          
+          this._logError(error, description, attempt, maxRetries, delay);
+
           if (this.enableLogging) {
             const errorType = classifyError(error);
             console.log(chalk.yellow(`   ⚠️ ${description} failed (attempt ${attempt}/${maxRetries})`));
@@ -82,6 +91,7 @@ export class RateLimiter {
           await sleep(delay);
         } else {
           // All retries exhausted
+          this._logError(error, description, attempt, maxRetries, null);
           if (this.enableLogging) {
             console.log(chalk.red(`   ❌ ${description} failed after ${maxRetries} attempts`));
           }
@@ -93,12 +103,12 @@ export class RateLimiter {
   }
 
   /**
-   * Execute multiple functions in parallel with staggered starts
-   * Prevents overwhelming the API with simultaneous requests
-   * 
+   * Execute multiple functions in parallel with staggered starts.
+   * Prevents overwhelming the API with simultaneous requests.
+   *
    * @param {Array<{fn: Function, name: string}>} tasks - Array of tasks with fn and name
    * @param {object} options - Execution options
-   * @returns {Promise<Array>} Array of results with status
+   * @returns {Promise<object>} Summary with results array
    */
   async executeParallelWithStagger(tasks, options = {}) {
     const staggerDelay = options.staggerDelay || this.staggerDelay;
@@ -115,7 +125,6 @@ export class RateLimiter {
         // Task 0: starts immediately
         // Task 1: starts after staggerDelay
         // Task 2: starts after staggerDelay * 2
-        // etc.
         await sleep(index * staggerDelay);
 
         let lastError;
@@ -123,19 +132,19 @@ export class RateLimiter {
 
         while (attempts < maxAttempts) {
           attempts++;
-          
+
           try {
             const result = await task.fn();
-            return { 
-              name: task.name, 
-              success: true, 
-              result, 
-              attempts 
+            return {
+              name: task.name,
+              success: true,
+              result,
+              attempts
             };
           } catch (error) {
             lastError = error;
-            
-            this._logError(error, task.name, attempts, maxAttempts);
+
+            this._logError(error, task.name, attempts, maxAttempts, null);
 
             if (!isRetryableError(error)) {
               // Non-retryable error, fail immediately
@@ -145,14 +154,14 @@ export class RateLimiter {
             }
 
             if (attempts < maxAttempts) {
-              const delay = isRateLimitError(error) 
-                ? getRetryDelay(error, attempts) 
+              const delay = isRateLimitError(error)
+                ? getRetryDelay(error, attempts)
                 : retryDelay;
-              
+
               if (this.enableLogging) {
                 console.log(chalk.yellow(`   ⚠️ ${task.name} failed attempt ${attempts}/${maxAttempts}, retrying in ${formatDelay(delay)}...`));
               }
-              
+
               await sleep(delay);
             }
           }
@@ -201,8 +210,8 @@ export class RateLimiter {
   }
 
   /**
-   * Execute with fallback - try primary function, fall back on failure
-   * 
+   * Execute with fallback — try primary function, fall back on failure.
+   *
    * @param {Function} primaryFn - Primary function to execute
    * @param {Function} fallbackFn - Fallback function if primary fails
    * @param {string} description - Description for logging
@@ -216,7 +225,7 @@ export class RateLimiter {
       if (this.enableLogging) {
         console.log(chalk.yellow(`   ⚡ ${description} using fallback after primary failed`));
       }
-      
+
       try {
         const result = await fallbackFn();
         return { result, usedFallback: true };
@@ -230,10 +239,17 @@ export class RateLimiter {
   }
 
   /**
-   * Log error for tracking
+   * Log error for tracking.
+   * Accepts the pre-computed delay so the logged value matches the actual sleep.
+   *
+   * @param {Error} error - The error that occurred
+   * @param {string} description - Operation description
+   * @param {number} attempt - Current attempt number
+   * @param {number} maxAttempts - Maximum attempts allowed
+   * @param {number|null} delay - Pre-computed delay in ms (null if no retry)
    * @private
    */
-  _logError(error, description, attempt, maxAttempts) {
+  _logError(error, description, attempt, maxAttempts, delay) {
     const logEntry = {
       timestamp: new Date().toISOString(),
       description,
@@ -245,9 +261,9 @@ export class RateLimiter {
       },
       attempt,
       maxAttempts,
-      delay: attempt < maxAttempts ? getRetryDelay(error, attempt) : null
+      delay
     };
-    
+
     this.errorLog.push(logEntry);
   }
 
@@ -281,7 +297,7 @@ export class RateLimiter {
     for (const entry of this.errorLog) {
       const type = entry.error.type;
       stats.byType[type] = (stats.byType[type] || 0) + 1;
-      
+
       if (entry.error.type === 'RATE_LIMIT') {
         stats.rateLimitErrors++;
       }
@@ -291,15 +307,13 @@ export class RateLimiter {
   }
 }
 
-// Export singleton instance for convenience
-export const rateLimiter = new RateLimiter();
-
-// Export utility functions
-export { 
-  isRetryableError, 
-  isRateLimitError, 
-  getRetryDelay, 
-  formatDelay, 
-  sleep, 
-  classifyError 
+// Re-export utility functions (no singleton — callers create their own instances)
+export {
+  isRetryableError,
+  isRateLimitError,
+  getRetryDelay,
+  formatDelay,
+  sleep,
+  classifyError,
+  parseRetryAfter
 };
