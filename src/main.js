@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+import dotenv from 'dotenv';
+dotenv.config({ quiet: true });
+
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { parseStaticAnalysisResults } from './parser/result-parser.js';
@@ -8,13 +11,191 @@ import { executeExploitationAgent } from './agents/executor.js';
 import { path, fs } from 'zx';
 import { getSupportedAnalyzers } from './parser/parser-factory.js';
 import { generateSarifReport, generateHtmlReport, generateDeveloperSummary } from './reporting/report-generator.js';
+import {
+  getProvider,
+  getAllProviders,
+  getConfiguredProviders,
+  createClientForProvider
+} from './providers/provider-registry.js';
+import {
+  loadConfig,
+  setDefaults,
+  getProviderConfig,
+  clearProviderConfig,
+  getConfigPath
+} from './config/config-manager.js';
+
+// ---------------------------------------------------------------------------
+// Subcommand routing
+// ---------------------------------------------------------------------------
+
+const args = process.argv.slice(2);
+const subcommand = args[0];
+
+if (subcommand === 'auth') {
+  const action = args[1]; // login | status | logout
+  if (action === 'login') {
+    await authLogin();
+  } else if (action === 'status') {
+    await authStatus();
+  } else if (action === 'logout') {
+    await authLogout();
+  } else {
+    console.log(chalk.cyan('Usage:'));
+    console.log(chalk.gray('  node src/main.js auth login    - Configure LLM provider credentials'));
+    console.log(chalk.gray('  node src/main.js auth status   - Show configured providers'));
+    console.log(chalk.gray('  node src/main.js auth logout   - Remove stored credentials'));
+    process.exit(0);
+  }
+} else {
+  await main();
+}
+
+// ---------------------------------------------------------------------------
+// Auth subcommands
+// ---------------------------------------------------------------------------
+
+/**
+ * Interactive provider authentication flow.
+ * Lists all available providers and lets the user pick one to configure.
+ */
+async function authLogin() {
+  console.log(chalk.cyan.bold('\n🔐 Provider Authentication'));
+  console.log(chalk.gray('─'.repeat(60)));
+
+  const providers = getAllProviders();
+  const configuredNames = (await getConfiguredProviders()).map(p => p.name);
+
+  const { providerName } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'providerName',
+      message: 'Select a provider to configure:',
+      choices: providers.map(p => ({
+        name: `${p.displayName}${configuredNames.includes(p.name) ? chalk.green(' [configured]') : ''}`,
+        value: p.name
+      }))
+    }
+  ]);
+
+  const provider = getProvider(providerName);
+  const success = await provider.authenticate();
+
+  if (success) {
+    // Ask if this should be the default
+    const { setAsDefault } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'setAsDefault',
+        message: `Set ${provider.displayName} as your default provider?`,
+        default: true
+      }
+    ]);
+
+    if (setAsDefault) {
+      const models = provider.getModels();
+      const { modelId } = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'modelId',
+          message: 'Select default model:',
+          choices: models.map(m => ({
+            name: `${m.name} — ${m.description}`,
+            value: m.id
+          })),
+          default: provider.getDefaultModel()
+        }
+      ]);
+      await setDefaults(providerName, modelId);
+      console.log(chalk.green(`\nDefault set: ${provider.displayName} / ${modelId}`));
+    }
+  }
+
+  console.log('');
+  process.exit(0);
+}
+
+/**
+ * Show which providers are configured and their status.
+ */
+async function authStatus() {
+  console.log(chalk.cyan.bold('\n📋 Provider Status'));
+  console.log(chalk.gray('─'.repeat(60)));
+
+  const config = await loadConfig();
+  const providers = getAllProviders();
+
+  for (const provider of providers) {
+    const isValid = await provider.validateAuth();
+    const icon = isValid ? chalk.green('✓') : chalk.gray('○');
+    const status = isValid ? chalk.green('configured') : chalk.gray('not configured');
+    const isDefault = config.defaultProvider === provider.name ? chalk.cyan(' (default)') : '';
+    console.log(`  ${icon} ${provider.displayName}: ${status}${isDefault}`);
+  }
+
+  if (config.defaultProvider && config.defaultModel) {
+    console.log(chalk.gray(`\nDefault: ${config.defaultProvider} / ${config.defaultModel}`));
+  }
+  console.log(chalk.gray(`Config: ${getConfigPath()}\n`));
+  process.exit(0);
+}
+
+/**
+ * Remove stored credentials for a provider.
+ */
+async function authLogout() {
+  console.log(chalk.cyan.bold('\n🗑️  Remove Credentials'));
+  console.log(chalk.gray('─'.repeat(60)));
+
+  const configured = await getConfiguredProviders();
+
+  if (configured.length === 0) {
+    console.log(chalk.gray('No providers configured.\n'));
+    process.exit(0);
+  }
+
+  const { providerName } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'providerName',
+      message: 'Select a provider to remove:',
+      choices: [
+        ...configured.map(p => ({
+          name: p.displayName,
+          value: p.name
+        })),
+        { name: chalk.red('Remove ALL providers'), value: '__all__' }
+      ]
+    }
+  ]);
+
+  if (providerName === '__all__') {
+    for (const p of configured) {
+      await clearProviderConfig(p.name);
+    }
+    console.log(chalk.green('All credentials removed.'));
+  } else {
+    await clearProviderConfig(providerName);
+    console.log(chalk.green(`${providerName} credentials removed.`));
+  }
+
+  console.log('');
+  process.exit(0);
+}
+
+// ---------------------------------------------------------------------------
+// Main testing flow
+// ---------------------------------------------------------------------------
 
 async function main() {
-  console.log(chalk.cyan.bold('\n🔍 Dynamic Security Tester (OpenAI Powered)'));
+  console.log(chalk.cyan.bold('\n🔍 Dynamic Security Tester'));
   console.log(chalk.gray('─'.repeat(60)));
   console.log(chalk.gray(`Supported analyzers: ${getSupportedAnalyzers().join(', ')}`));
   console.log(chalk.gray('─'.repeat(60)));
 
+  // ------------------------------------------------------------------
+  // Prompt 1-3: Analyzer results, target URL, output directory
+  // ------------------------------------------------------------------
   const answers = await inquirer.prompt([
     {
       type: 'input',
@@ -53,7 +234,12 @@ async function main() {
   ]);
 
   const { resultJsonPath, targetUrl, outputDir } = answers;
-  
+
+  // ------------------------------------------------------------------
+  // Prompt 4: Provider and model selection
+  // ------------------------------------------------------------------
+  const { providerName, modelId, client } = await selectProviderAndModel();
+
   // Parse comma-separated paths
   const resultPaths = resultJsonPath.split(',').map(p => p.trim());
 
@@ -62,6 +248,8 @@ async function main() {
   resultPaths.forEach(p => console.log(chalk.gray(`  • ${p}`)));
   console.log(chalk.gray(`- Target: ${targetUrl}`));
   console.log(chalk.gray(`- Output: ${outputDir}`));
+  console.log(chalk.gray(`- Provider: ${providerName}`));
+  console.log(chalk.gray(`- Model: ${modelId}`));
   console.log(chalk.gray('─'.repeat(40)));
 
   try {
@@ -94,7 +282,7 @@ async function main() {
       traversal: 'exploit-traversal.txt',
       xxe: 'exploit-xxe.txt',
       redirect: 'exploit-redirect.txt',
-      dependency: 'exploit-generic.txt',  // Dependencies typically don't need dynamic testing
+      dependency: 'exploit-generic.txt',
       config: 'exploit-generic.txt',
       other: 'exploit-generic.txt'
     };
@@ -128,7 +316,6 @@ async function main() {
           
           if (!(await fs.pathExists(promptPath))) {
             console.log(chalk.yellow(`⚠️ Prompt template not found: ${promptFile}. Using generic prompt.`));
-            // Create a generic prompt if it doesn't exist
             const genericPromptPath = path.resolve(process.cwd(), 'prompts', 'exploit-generic.txt');
             if (!(await fs.pathExists(genericPromptPath))) {
               await createGenericPrompt(genericPromptPath);
@@ -139,7 +326,8 @@ async function main() {
             await fs.pathExists(promptPath) ? promptPath : path.resolve(process.cwd(), 'prompts', 'exploit-generic.txt'),
             queuePath,
             targetUrl,
-            outputDir
+            outputDir,
+            { model: modelId, client }
           );
           
           if (result.success) {
@@ -190,6 +378,101 @@ async function main() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Provider / model selection
+// ---------------------------------------------------------------------------
+
+/**
+ * Prompt the user to select an LLM provider and model.
+ * Handles auto-selection when only one provider is available,
+ * and backward-compatible env-var fallback.
+ *
+ * @returns {Promise<{providerName: string, modelId: string, client: import('openai').default}>}
+ */
+async function selectProviderAndModel() {
+  const config = await loadConfig();
+  const configured = await getConfiguredProviders();
+
+  // If nothing configured and OPENAI_API_KEY is set, auto-use OpenAI
+  if (configured.length === 0 && process.env.OPENAI_API_KEY) {
+    console.log(chalk.gray('\nUsing OpenAI from OPENAI_API_KEY environment variable.'));
+    const provider = getProvider('openai');
+    const client = provider.createClient({ apiKey: process.env.OPENAI_API_KEY });
+    return { providerName: 'openai', modelId: 'gpt-4o', client };
+  }
+
+  if (configured.length === 0) {
+    console.log(chalk.yellow('\nNo LLM providers configured.'));
+    console.log(chalk.gray('Run: node src/main.js auth login'));
+    console.log(chalk.gray('Or set OPENAI_API_KEY environment variable.'));
+    process.exit(1);
+  }
+
+  let providerName;
+  let modelId;
+
+  // If only one provider is configured, skip the provider selection
+  if (configured.length === 1) {
+    providerName = configured[0].name;
+    console.log(chalk.gray(`\nUsing ${configured[0].displayName} (only configured provider).`));
+  } else {
+    // Check for stored default
+    if (config.defaultProvider && config.defaultModel) {
+      const { useDefault } = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'useDefault',
+          message: `Use default provider ${config.defaultProvider}/${config.defaultModel}?`,
+          default: true
+        }
+      ]);
+      if (useDefault) {
+        const client = await createClientForProvider(config.defaultProvider);
+        return { providerName: config.defaultProvider, modelId: config.defaultModel, client };
+      }
+    }
+
+    // Step 1: Select provider
+    const { selectedProvider } = await inquirer.prompt([
+      {
+        type: 'list',
+        name: 'selectedProvider',
+        message: 'Select LLM provider:',
+        choices: configured.map(p => ({
+          name: p.displayName,
+          value: p.name
+        }))
+      }
+    ]);
+    providerName = selectedProvider;
+  }
+
+  // Step 2: Select model
+  const provider = getProvider(providerName);
+  const models = provider.getModels();
+
+  const { selectedModel } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'selectedModel',
+      message: 'Select model:',
+      choices: models.map(m => ({
+        name: `${m.name} — ${m.description}`,
+        value: m.id
+      })),
+      default: provider.getDefaultModel()
+    }
+  ]);
+  modelId = selectedModel;
+
+  const client = await createClientForProvider(providerName);
+  return { providerName, modelId, client };
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 async function createGenericPrompt(promptPath) {
   const genericPrompt = `<role>
 You are a Security Exploitation Specialist. Your goal is to test vulnerabilities identified by static analysis.
@@ -220,5 +503,3 @@ Document successful exploits with proof.
   await fs.ensureDir(path.dirname(promptPath));
   await fs.writeFile(promptPath, genericPrompt);
 }
-
-main();

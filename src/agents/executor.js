@@ -14,8 +14,6 @@ import { BypassEngine } from '../testing/bypass-engine.js';
 import { ResponseAnalyzer } from '../testing/response-analyzer.js';
 import { IntelligenceAggregator } from '../testing/intelligence-aggregator.js';
 
-const openai = new OpenAI();
-
 // Maximum characters for tool results to avoid token limits
 const MAX_TOOL_RESULT_LENGTH = 8000;
 
@@ -41,7 +39,17 @@ function truncateResult(obj, maxLen = MAX_TOOL_RESULT_LENGTH) {
 }
 
 /**
- * Execute LLM agent for dynamic testing using OpenAI
+ * Execute LLM agent for dynamic testing.
+ * Accepts an OpenAI-SDK-compatible client from any provider (OpenAI, DeepSeek, etc.).
+ *
+ * @param {string} promptTemplate - Path to the prompt template file
+ * @param {string} queuePath - Path to the vulnerability queue JSON
+ * @param {string} targetUrl - Target URL for dynamic testing
+ * @param {string} outputDir - Output directory for results
+ * @param {object} [options]
+ * @param {string} [options.model='gpt-4o'] - Model identifier
+ * @param {number} [options.maxRetries=3] - Max API retries
+ * @param {import('openai').default} [options.client] - Pre-configured OpenAI SDK client
  */
 export async function executeExploitationAgent(
   promptTemplate,
@@ -52,9 +60,10 @@ export async function executeExploitationAgent(
 ) {
   const model = options.model || 'gpt-4o';
   const maxRetries = options.maxRetries || 3;
+  const llmClient = options.client || new OpenAI();
   const rateLimiter = new RateLimiter({ maxRetries, enableLogging: true });
   
-  console.log(chalk.cyan(`🚀 Starting OpenAI exploitation agent (${model})...`));
+  console.log(chalk.cyan(`🚀 Starting exploitation agent (${model})...`));
   console.log(chalk.gray(`   Rate limit handling: ${maxRetries} retries with exponential backoff`));
   
   // Load prompt template
@@ -687,7 +696,7 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
       try {
         response = await rateLimiter.executeWithRetry(
           async () => {
-            return await openai.chat.completions.create({
+            return await llmClient.chat.completions.create({
               model: model,
               messages: messages,
               tools: tools,
@@ -830,8 +839,9 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
  * Execute multiple agents in parallel with staggered starts
  * Prevents API overwhelm and handles rate limits gracefully
  * 
- * @param {Array<{promptTemplate: string, queuePath: string, targetUrl: string, outputDir: string, name: string}>} agents
+ * @param {Array<{promptTemplate: string, queuePath: string, targetUrl: string, outputDir: string, name: string, model?: string}>} agents
  * @param {object} options - Execution options
+ * @param {import('openai').default} [options.client] - Pre-configured OpenAI SDK client
  * @returns {Promise<object>} Results summary
  */
 export async function executeAgentsInParallel(agents, options = {}) {
@@ -857,7 +867,7 @@ export async function executeAgentsInParallel(agents, options = {}) {
         agent.queuePath,
         agent.targetUrl,
         agent.outputDir,
-        { ...options, model: agent.model || options.model }
+        { ...options, model: agent.model || options.model, client: options.client }
       );
     }
   }));
