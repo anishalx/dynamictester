@@ -6,6 +6,7 @@ import { StagehandManager } from '../mcp/stagehand-manager.js';
 import { 
   RateLimiter, 
   isRateLimitError, 
+  classifyError,
   formatDelay,
   sleep 
 } from '../utils/rate-limiter.js';
@@ -119,6 +120,16 @@ function buildStagehandConfig(providerName, model, providerConfig) {
         stagehandModel: `google/${model}`,
         modelClientOptions: {
           apiKey: providerConfig?.apiKey || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY
+        },
+        disableAI: false
+      };
+
+    case 'copilot':
+      return {
+        stagehandModel: `openai/${model}`,
+        modelClientOptions: {
+          apiKey: providerConfig?.token || process.env.GITHUB_COPILOT_TOKEN,
+          baseURL: 'https://api.githubcopilot.com'
         },
         disableAI: false
       };
@@ -811,7 +822,7 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
               temperature: 0.2,
             });
           },
-          `OpenAI API request (turn ${turnCount + 1})`,
+          `${providerName} API request (turn ${turnCount + 1})`,
           { maxRetries }
         );
         // Only count the turn after a successful API response
@@ -821,8 +832,26 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
         consecutiveErrors++;
         console.log(chalk.red(`   ❌ API call failed: ${apiError.message}`));
         
+        // Auth errors (401/403) are fatal — no point retrying a banned/invalid key
+        const errorType = classifyError(apiError);
+        if (errorType === 'AUTH_ERROR') {
+          console.log(chalk.red(`\n   ❌ Authentication/authorization error — stopping agent immediately`));
+          console.log(chalk.yellow(`\n   Possible actions:`));
+          console.log(chalk.yellow(`      • Re-authenticate: node src/main.js auth login`));
+          console.log(chalk.yellow(`      • Switch to a different provider or account`));
+          console.log(chalk.yellow(`      • Check provider dashboard for account status`));
+          break;
+        }
+
         if (consecutiveErrors >= maxConsecutiveErrors) {
+          const isQuota = isRateLimitError(apiError);
           console.log(chalk.red(`\n   ❌ Too many consecutive errors (${maxConsecutiveErrors}), stopping agent`));
+          if (isQuota) {
+            console.log(chalk.yellow(`\n   Provider quota exhausted (${providerName}). Possible actions:`));
+            console.log(chalk.yellow(`      • Wait and retry later`));
+            console.log(chalk.yellow(`      • Switch to a different provider: node src/main.js auth login`));
+            console.log(chalk.yellow(`      • Check your quota/billing at the provider dashboard`));
+          }
           break;
         }
         

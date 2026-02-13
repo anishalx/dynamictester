@@ -3,6 +3,7 @@ import { DeepSeekProvider } from './deepseek-provider.js';
 import { QwenProvider } from './qwen-provider.js';
 import { GitHubProvider } from './github-provider.js';
 import { GoogleProvider } from './google-provider.js';
+import { CopilotProvider } from './copilot-provider.js';
 import { getProviderConfig, getConfiguredProviders as getConfiguredProviderNames } from '../config/config-manager.js';
 
 /**
@@ -19,7 +20,8 @@ const PROVIDER_REGISTRY = Object.freeze({
   deepseek: DeepSeekProvider,
   qwen: QwenProvider,
   github: GitHubProvider,
-  google: GoogleProvider
+  google: GoogleProvider,
+  copilot: CopilotProvider
 });
 
 /**

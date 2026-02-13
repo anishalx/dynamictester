@@ -44,14 +44,7 @@ export class GoogleProvider extends BaseProvider {
       // Gemini models (available via both auth modes)
       { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Fast, multimodal, 1M context' },
       { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', description: 'Best Gemini model, 1M context' },
-      { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', description: 'Previous gen fast model' },
-      // Antigravity-only models (bare names matching the Antigravity API)
-      { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5 (Antigravity)', description: 'Anthropic Claude Sonnet via Google' },
-      { id: 'claude-sonnet-4-5-thinking', name: 'Claude Sonnet 4.5 Thinking (Antigravity)', description: 'Claude reasoning via Google' },
-      { id: 'claude-opus-4-5-thinking', name: 'Claude Opus 4.5 Thinking (Antigravity)', description: 'Claude Opus reasoning via Google' },
-      { id: 'gemini-3-pro-high', name: 'Gemini 3 Pro High (Antigravity)', description: 'Gemini 3 via Antigravity' },
-      { id: 'gemini-3-flash', name: 'Gemini 3 Flash (Antigravity)', description: 'Fast Gemini 3 via Antigravity' },
-      { id: 'gpt-oss-120b-medium', name: 'GPT-OSS 120B (Antigravity)', description: 'OpenAI OSS model via Google' }
+      { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', description: 'Previous gen fast model' }
     ];
   }
 

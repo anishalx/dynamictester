@@ -409,6 +409,11 @@ export class AntigravityClient {
       const error = new Error(`Antigravity API error (${resp.status}): ${errorText}`);
       error.status = resp.status;
       error.type = resp.status === 429 ? 'rate_limit_error' : 'api_error';
+      // Attach headers so parseRetryAfter() in error-handling.js can use them
+      const retryAfter = resp.headers.get('retry-after');
+      if (retryAfter) {
+        error.headers = { 'retry-after': retryAfter };
+      }
       throw error;
     }
 
