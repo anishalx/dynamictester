@@ -67,32 +67,6 @@ export class GitHubProvider extends BaseProvider {
       }
     ]);
 
-    // Validate with a lightweight models list
-    try {
-      console.log(chalk.gray('Validating token...'));
-      const client = new OpenAI({
-        apiKey: token.trim(),
-        baseURL: GITHUB_MODELS_BASE_URL
-      });
-      await client.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: 'hi' }],
-        max_tokens: 1
-      });
-      console.log(chalk.green('Token validated successfully.'));
-    } catch (e) {
-      console.log(chalk.red(`Validation failed: ${e.message}`));
-      const { proceed } = await inquirer.prompt([
-        {
-          type: 'confirm',
-          name: 'proceed',
-          message: 'Save the token anyway?',
-          default: false
-        }
-      ]);
-      if (!proceed) return false;
-    }
-
     await setProviderConfig('github', { token: token.trim() });
     console.log(chalk.green('GitHub Models credentials saved.'));
     return true;

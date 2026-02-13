@@ -77,33 +77,6 @@ export class QwenProvider extends BaseProvider {
       }
     ]);
 
-    // Validate
-    try {
-      console.log(chalk.gray('Validating API key...'));
-      const client = new OpenAI({
-        apiKey: apiKey.trim(),
-        baseURL: QWEN_ENDPOINTS[region]
-      });
-      // Qwen's /models endpoint may not be available; try a lightweight completion
-      await client.chat.completions.create({
-        model: 'qwen-turbo',
-        messages: [{ role: 'user', content: 'hi' }],
-        max_tokens: 1
-      });
-      console.log(chalk.green('API key validated successfully.'));
-    } catch (e) {
-      console.log(chalk.red(`Validation failed: ${e.message}`));
-      const { proceed } = await inquirer.prompt([
-        {
-          type: 'confirm',
-          name: 'proceed',
-          message: 'Save the key anyway?',
-          default: false
-        }
-      ]);
-      if (!proceed) return false;
-    }
-
     await setProviderConfig('qwen', { apiKey: apiKey.trim(), region });
     console.log(chalk.green('Qwen credentials saved.'));
     return true;

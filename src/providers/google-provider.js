@@ -5,10 +5,9 @@ import { BaseProvider } from './provider-interface.js';
 import { getProviderConfig, setProviderConfig } from '../config/config-manager.js';
 import {
   runAntigravityOAuthFlow,
-  ensureFreshToken,
-  isTokenValid,
-  getAntigravityBaseUrl
+  ensureFreshToken
 } from './google-oauth.js';
+import { AntigravityClient } from './antigravity-client.js';
 
 /**
  * Google Gemini API base URL (standard API-key access via AI Studio).
@@ -46,9 +45,13 @@ export class GoogleProvider extends BaseProvider {
       { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Fast, multimodal, 1M context' },
       { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', description: 'Best Gemini model, 1M context' },
       { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', description: 'Previous gen fast model' },
-      // Antigravity-only models (Claude via Google)
-      { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4 (Antigravity)', description: 'Anthropic Claude Sonnet via Google' },
-      { id: 'claude-opus-4-20250514', name: 'Claude Opus 4 (Antigravity)', description: 'Anthropic Claude Opus via Google' }
+      // Antigravity-only models (bare names matching the Antigravity API)
+      { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5 (Antigravity)', description: 'Anthropic Claude Sonnet via Google' },
+      { id: 'claude-sonnet-4-5-thinking', name: 'Claude Sonnet 4.5 Thinking (Antigravity)', description: 'Claude reasoning via Google' },
+      { id: 'claude-opus-4-5-thinking', name: 'Claude Opus 4.5 Thinking (Antigravity)', description: 'Claude Opus reasoning via Google' },
+      { id: 'gemini-3-pro-high', name: 'Gemini 3 Pro High (Antigravity)', description: 'Gemini 3 via Antigravity' },
+      { id: 'gemini-3-flash', name: 'Gemini 3 Flash (Antigravity)', description: 'Fast Gemini 3 via Antigravity' },
+      { id: 'gpt-oss-120b-medium', name: 'GPT-OSS 120B (Antigravity)', description: 'OpenAI OSS model via Google' }
     ];
   }
 
@@ -57,12 +60,15 @@ export class GoogleProvider extends BaseProvider {
   }
 
   /**
-   * Determine which models require Antigravity auth (Claude models).
+   * Determine which models require Antigravity auth.
+   * Claude models, Gemini 3, and GPT-OSS are only available through Antigravity.
    * @param {string} modelId
    * @returns {boolean}
    */
   _requiresAntigravity(modelId) {
-    return modelId.startsWith('claude-');
+    return modelId.startsWith('claude-') ||
+           modelId.startsWith('gemini-3') ||
+           modelId.startsWith('gpt-oss');
   }
 
   async authenticate() {
@@ -115,32 +121,6 @@ export class GoogleProvider extends BaseProvider {
         }
       }
     ]);
-
-    // Validate with a lightweight call
-    try {
-      console.log(chalk.gray('Validating API key...'));
-      const client = new OpenAI({
-        apiKey: apiKey.trim(),
-        baseURL: GEMINI_BASE_URL
-      });
-      await client.chat.completions.create({
-        model: 'gemini-2.0-flash',
-        messages: [{ role: 'user', content: 'hi' }],
-        max_tokens: 1
-      });
-      console.log(chalk.green('API key validated successfully.'));
-    } catch (e) {
-      console.log(chalk.red(`Validation failed: ${e.message}`));
-      const { proceed } = await inquirer.prompt([
-        {
-          type: 'confirm',
-          name: 'proceed',
-          message: 'Save the key anyway?',
-          default: false
-        }
-      ]);
-      if (!proceed) return false;
-    }
 
     await setProviderConfig('google', {
       authMode: 'apikey',
@@ -197,8 +177,13 @@ export class GoogleProvider extends BaseProvider {
   }
 
   /**
+   * Create an LLM client for the stored provider config.
+   *
+   * Returns an OpenAI SDK instance for API-key mode, or an AntigravityClient
+   * adapter for Antigravity OAuth mode.
+   *
    * @param {object} providerConfig
-   * @returns {OpenAI}
+   * @returns {OpenAI|AntigravityClient}
    */
   createClient(providerConfig) {
     if (!providerConfig) {
@@ -218,10 +203,9 @@ export class GoogleProvider extends BaseProvider {
     }
 
     if (providerConfig.authMode === 'antigravity') {
-      // For Antigravity, use the sandbox endpoint with the OAuth access token
-      return new OpenAI({
-        apiKey: providerConfig.accessToken,
-        baseURL: getAntigravityBaseUrl()
+      return new AntigravityClient({
+        accessToken: providerConfig.accessToken,
+        projectId: providerConfig.projectId
       });
     }
 
@@ -233,7 +217,7 @@ export class GoogleProvider extends BaseProvider {
    * Refreshes the token if expired and persists the updated token.
    *
    * @param {object} providerConfig - Stored provider config
-   * @returns {Promise<OpenAI>} An OpenAI SDK instance with fresh credentials
+   * @returns {Promise<OpenAI|AntigravityClient>} Client with fresh credentials
    */
   async createClientAsync(providerConfig) {
     if (!providerConfig || providerConfig.authMode !== 'antigravity') {
@@ -256,9 +240,9 @@ export class GoogleProvider extends BaseProvider {
       });
     }
 
-    return new OpenAI({
-      apiKey: freshTokenData.accessToken,
-      baseURL: getAntigravityBaseUrl()
+    return new AntigravityClient({
+      accessToken: freshTokenData.accessToken,
+      projectId: providerConfig.projectId
     });
   }
 }

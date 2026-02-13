@@ -238,7 +238,7 @@ async function main() {
   // ------------------------------------------------------------------
   // Prompt 4: Provider and model selection
   // ------------------------------------------------------------------
-  const { providerName, modelId, client } = await selectProviderAndModel();
+  const { providerName, modelId, client, providerConfig } = await selectProviderAndModel();
 
   // Parse comma-separated paths
   const resultPaths = resultJsonPath.split(',').map(p => p.trim());
@@ -327,7 +327,7 @@ async function main() {
             queuePath,
             targetUrl,
             outputDir,
-            { model: modelId, client }
+            { model: modelId, client, providerName, providerConfig }
           );
           
           if (result.success) {
@@ -397,8 +397,9 @@ async function selectProviderAndModel() {
   if (configured.length === 0 && process.env.OPENAI_API_KEY) {
     console.log(chalk.gray('\nUsing OpenAI from OPENAI_API_KEY environment variable.'));
     const provider = getProvider('openai');
-    const client = provider.createClient({ apiKey: process.env.OPENAI_API_KEY });
-    return { providerName: 'openai', modelId: 'gpt-4o', client };
+    const providerConfig = { apiKey: process.env.OPENAI_API_KEY };
+    const client = provider.createClient(providerConfig);
+    return { providerName: 'openai', modelId: 'gpt-4o', client, providerConfig };
   }
 
   if (configured.length === 0) {
@@ -427,8 +428,9 @@ async function selectProviderAndModel() {
         }
       ]);
       if (useDefault) {
+        const providerConfig = await getProviderConfig(config.defaultProvider);
         const client = await createClientForProvider(config.defaultProvider);
-        return { providerName: config.defaultProvider, modelId: config.defaultModel, client };
+        return { providerName: config.defaultProvider, modelId: config.defaultModel, client, providerConfig };
       }
     }
 
@@ -465,8 +467,9 @@ async function selectProviderAndModel() {
   ]);
   modelId = selectedModel;
 
+  const providerConfig = await getProviderConfig(providerName);
   const client = await createClientForProvider(providerName);
-  return { providerName, modelId, client };
+  return { providerName, modelId, client, providerConfig };
 }
 
 // ---------------------------------------------------------------------------

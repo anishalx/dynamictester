@@ -39,6 +39,100 @@ function truncateResult(obj, maxLen = MAX_TOOL_RESULT_LENGTH) {
 }
 
 /**
+ * Qwen / DashScope region endpoints (duplicated from qwen-provider.js to avoid
+ * circular imports — the Stagehand config builder needs these at runtime).
+ * @type {Record<string, string>}
+ */
+const QWEN_ENDPOINTS = Object.freeze({
+  international: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+  us: 'https://dashscope-us.aliyuncs.com/compatible-mode/v1',
+  china: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+});
+
+/**
+ * Build Stagehand model configuration from provider info.
+ * Maps each provider to a Stagehand-compatible model format + client options.
+ *
+ * Stagehand supports AI SDK `provider/model` format with optional
+ * `modelClientOptions` for custom API keys and base URLs.
+ *
+ * @param {string} providerName - Provider key
+ * @param {string} model - Model ID (e.g. 'gpt-4o', 'deepseek-chat')
+ * @param {object} providerConfig - Stored provider config
+ * @returns {{ stagehandModel: string, modelClientOptions: object, disableAI: boolean }}
+ */
+function buildStagehandConfig(providerName, model, providerConfig) {
+  switch (providerName) {
+    case 'openai':
+      return {
+        stagehandModel: `openai/${model}`,
+        modelClientOptions: providerConfig?.apiKey
+          ? { apiKey: providerConfig.apiKey }
+          : {},
+        disableAI: false
+      };
+
+    case 'deepseek':
+      return {
+        stagehandModel: `openai/${model}`,
+        modelClientOptions: {
+          apiKey: providerConfig?.apiKey || process.env.DEEPSEEK_API_KEY,
+          baseURL: 'https://api.deepseek.com'
+        },
+        disableAI: false
+      };
+
+    case 'qwen': {
+      const region = providerConfig?.region || 'international';
+      return {
+        stagehandModel: `openai/${model}`,
+        modelClientOptions: {
+          apiKey: providerConfig?.apiKey || process.env.DASHSCOPE_API_KEY,
+          baseURL: QWEN_ENDPOINTS[region] || QWEN_ENDPOINTS.international
+        },
+        disableAI: false
+      };
+    }
+
+    case 'github':
+      return {
+        stagehandModel: `openai/${model}`,
+        modelClientOptions: {
+          apiKey: providerConfig?.token || process.env.GITHUB_TOKEN,
+          baseURL: 'https://models.inference.ai.azure.com'
+        },
+        disableAI: false
+      };
+
+    case 'google':
+      if (providerConfig?.authMode === 'antigravity') {
+        // Antigravity API is NOT OpenAI-compatible — Stagehand cannot use it.
+        // Disable Stagehand AI features; fall back to basic Playwright only.
+        return {
+          stagehandModel: 'openai/gpt-4o',
+          modelClientOptions: {},
+          disableAI: true
+        };
+      }
+      // Standard Gemini API key — Stagehand supports the google provider
+      return {
+        stagehandModel: `google/${model}`,
+        modelClientOptions: {
+          apiKey: providerConfig?.apiKey || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY
+        },
+        disableAI: false
+      };
+
+    default:
+      return {
+        stagehandModel: `openai/${model}`,
+        modelClientOptions: {},
+        disableAI: false
+      };
+  }
+}
+
+/**
  * Execute LLM agent for dynamic testing.
  * Accepts an OpenAI-SDK-compatible client from any provider (OpenAI, DeepSeek, etc.).
  *
@@ -50,6 +144,8 @@ function truncateResult(obj, maxLen = MAX_TOOL_RESULT_LENGTH) {
  * @param {string} [options.model='gpt-4o'] - Model identifier
  * @param {number} [options.maxRetries=3] - Max API retries
  * @param {import('openai').default} [options.client] - Pre-configured OpenAI SDK client
+ * @param {string} [options.providerName] - Provider key (openai, deepseek, qwen, github, google)
+ * @param {object} [options.providerConfig] - Stored provider config (apiKey, baseURL, token, etc.)
  */
 export async function executeExploitationAgent(
   promptTemplate,
@@ -61,6 +157,8 @@ export async function executeExploitationAgent(
   const model = options.model || 'gpt-4o';
   const maxRetries = options.maxRetries || 3;
   const llmClient = options.client || new OpenAI();
+  const providerName = options.providerName || 'openai';
+  const providerConfig = options.providerConfig || {};
   const rateLimiter = new RateLimiter({ maxRetries, enableLogging: true });
   
   console.log(chalk.cyan(`🚀 Starting exploitation agent (${model})...`));
@@ -152,35 +250,43 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
   // ---------------------------------------------------------------------------
   // Initialize Stagehand (AI browser) → pass page/context to BrowserManager
   // ---------------------------------------------------------------------------
-  const stagehandManager = new StagehandManager();
+  const stagehandConfig = buildStagehandConfig(providerName, model, providerConfig);
+  let stagehandManager = null;
   let browserManager;
 
-  try {
-    console.log(chalk.gray('   Initializing Stagehand AI browser...'));
-    await stagehandManager.init();
-    const stagehandPage = stagehandManager.getPage();
-    const stagehandContext = stagehandManager.getContext();
-    const stagehandBrowser = stagehandManager.getBrowser();
+  if (stagehandConfig.disableAI) {
+    // Provider (e.g. Antigravity) is incompatible with Stagehand — use standalone Playwright
+    console.log(chalk.gray('   Stagehand AI disabled (incompatible provider) — using standalone Playwright'));
+    browserManager = new BrowserManager();
+  } else {
+    stagehandManager = new StagehandManager({
+      stagehandModel: stagehandConfig.stagehandModel,
+      modelClientOptions: stagehandConfig.modelClientOptions
+    });
 
-    if (stagehandPage && stagehandContext) {
-      // Stagehand owns the browser process; BrowserManager uses the CDP-connected
-      // Playwright page/context/browser for full API compatibility.
-      browserManager = new BrowserManager({
-        page: stagehandPage,
-        context: stagehandContext,
-        browser: stagehandBrowser
-      });
-      console.log(chalk.green('   Stagehand initialized — CDP browser shared with BrowserManager'));
-    } else {
-      // Stagehand init succeeded but CDP connection failed — fall back
-      console.log(chalk.yellow('   Stagehand page not available — falling back to standalone browser'));
+    try {
+      console.log(chalk.gray(`   Initializing Stagehand AI browser (${stagehandConfig.stagehandModel})...`));
+      await stagehandManager.init();
+      const stagehandPage = stagehandManager.getPage();
+      const stagehandContext = stagehandManager.getContext();
+      const stagehandBrowser = stagehandManager.getBrowser();
+
+      if (stagehandPage && stagehandContext) {
+        browserManager = new BrowserManager({
+          page: stagehandPage,
+          context: stagehandContext,
+          browser: stagehandBrowser
+        });
+        console.log(chalk.green('   Stagehand initialized — CDP browser shared with BrowserManager'));
+      } else {
+        console.log(chalk.yellow('   Stagehand page not available — falling back to standalone browser'));
+        browserManager = new BrowserManager();
+      }
+    } catch (stagehandError) {
+      console.log(chalk.yellow(`   Stagehand init failed: ${stagehandError.message}`));
+      console.log(chalk.yellow('   Falling back to standalone Playwright browser'));
       browserManager = new BrowserManager();
     }
-  } catch (stagehandError) {
-    // Stagehand failed to initialize — fall back to standalone BrowserManager
-    console.log(chalk.yellow(`   Stagehand init failed: ${stagehandError.message}`));
-    console.log(chalk.yellow('   Falling back to standalone Playwright browser'));
-    browserManager = new BrowserManager();
   }
   
   // Initialize testing utilities (shared across all tool calls within this agent)
@@ -513,7 +619,7 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
   }
 
   const browserTools = browserManager.getTools();
-  const stagehandTools = stagehandManager.getTools();
+  const stagehandTools = stagehandManager ? stagehandManager.getTools() : [];
   
   const tools = [
     ...browserTools.map(t => ({
@@ -831,7 +937,9 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
     };
   } finally {
     try { await browserManager.close(); } catch (e) { /* cleanup error */ }
-    try { await stagehandManager.close(); } catch (e) { /* cleanup error */ }
+    if (stagehandManager) {
+      try { await stagehandManager.close(); } catch (e) { /* cleanup error */ }
+    }
   }
 }
 

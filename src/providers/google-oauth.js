@@ -2,12 +2,20 @@ import { createServer } from 'http';
 import { URL } from 'url';
 import { randomBytes, createHash } from 'crypto';
 import chalk from 'chalk';
+import inquirer from 'inquirer';
 
 /**
  * Antigravity OAuth client ID — shared by all opencode-compatible tools.
  * @type {string}
  */
 const CLIENT_ID = '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
+
+/**
+ * Antigravity OAuth client secret.
+ * Required for token exchange and refresh. Shared by opencode-compatible tools.
+ * @type {string}
+ */
+const CLIENT_SECRET = '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';
 
 /**
  * Local callback port for OAuth redirect.
@@ -17,9 +25,10 @@ const CALLBACK_PORT = 51121;
 
 /**
  * Redirect URI for the local callback server.
+ * Must include the /oauth-callback path to match opencode's convention.
  * @type {string}
  */
-const REDIRECT_URI = `http://localhost:${CALLBACK_PORT}`;
+const REDIRECT_URI = `http://localhost:${CALLBACK_PORT}/oauth-callback`;
 
 /**
  * Google token endpoint.
@@ -40,14 +49,31 @@ const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const SANDBOX_BASE_URL = 'https://daily-cloudcode-pa.sandbox.googleapis.com';
 
 /**
+ * Default fallback project ID when discovery fails.
+ * @type {string}
+ */
+const DEFAULT_PROJECT_ID = 'rising-fact-p41fc';
+
+/**
  * Scopes required for Antigravity access.
+ * Matches the 5 scopes used by opencode.
  * @type {string[]}
  */
 const SCOPES = [
   'https://www.googleapis.com/auth/cloud-platform',
   'https://www.googleapis.com/auth/userinfo.email',
-  'openid'
+  'https://www.googleapis.com/auth/userinfo.profile',
+  'openid',
+  'https://www.googleapis.com/auth/cclog',
+  'https://www.googleapis.com/auth/experimentsandconfigs'
 ];
+
+/**
+ * Delay (ms) before showing the manual paste fallback prompt.
+ * Gives the local callback server time to receive the redirect automatically.
+ * @type {number}
+ */
+const PASTE_FALLBACK_DELAY_MS = 15000;
 
 /**
  * Generate a PKCE code verifier (43-128 character random string).
@@ -64,6 +90,15 @@ function generateCodeVerifier() {
  */
 function generateCodeChallenge(verifier) {
   return createHash('sha256').update(verifier).digest('base64url');
+}
+
+/**
+ * Simple sleep utility.
+ * @param {number} ms
+ * @returns {Promise<void>}
+ */
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -92,9 +127,12 @@ export function buildAuthorizationUrl(codeVerifier, state) {
  * Start a local HTTP server to receive the OAuth callback.
  * Resolves with the authorization code when Google redirects back.
  *
+ * The server listens for GET requests on /oauth-callback and validates
+ * the state parameter against the expected value to prevent CSRF.
+ *
  * @param {string} expectedState - The state parameter to validate
  * @param {number} [timeoutMs=120000] - Maximum time to wait for callback
- * @returns {Promise<string>} The authorization code
+ * @returns {Promise<{code: string, closeServer: Function}>} The authorization code and a cleanup function
  */
 export function waitForCallback(expectedState, timeoutMs = 120000) {
   return new Promise((resolve, reject) => {
@@ -103,7 +141,7 @@ export function waitForCallback(expectedState, timeoutMs = 120000) {
     const server = createServer((req, res) => {
       const url = new URL(req.url, `http://localhost:${CALLBACK_PORT}`);
 
-      if (url.pathname !== '/') {
+      if (url.pathname !== '/oauth-callback') {
         res.writeHead(404);
         res.end('Not found');
         return;
@@ -116,35 +154,43 @@ export function waitForCallback(expectedState, timeoutMs = 120000) {
       if (error) {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end('<html><body><h2>Authentication failed</h2><p>You can close this window.</p></body></html>');
-        settled = true;
-        server.close();
-        reject(new Error(`OAuth error: ${error}`));
+        if (!settled) {
+          settled = true;
+          server.close();
+          reject(new Error(`OAuth error: ${error}`));
+        }
         return;
       }
 
       if (state !== expectedState) {
         res.writeHead(400, { 'Content-Type': 'text/html' });
         res.end('<html><body><h2>Invalid state</h2><p>CSRF validation failed.</p></body></html>');
-        settled = true;
-        server.close();
-        reject(new Error('OAuth state mismatch — possible CSRF attack'));
+        if (!settled) {
+          settled = true;
+          server.close();
+          reject(new Error('OAuth state mismatch — possible CSRF attack'));
+        }
         return;
       }
 
       if (!code) {
         res.writeHead(400, { 'Content-Type': 'text/html' });
         res.end('<html><body><h2>Missing code</h2></body></html>');
-        settled = true;
-        server.close();
-        reject(new Error('No authorization code in callback'));
+        if (!settled) {
+          settled = true;
+          server.close();
+          reject(new Error('No authorization code in callback'));
+        }
         return;
       }
 
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end('<html><body><h2>Authentication successful!</h2><p>You can close this window and return to the terminal.</p></body></html>');
-      settled = true;
-      server.close();
-      resolve(code);
+      if (!settled) {
+        settled = true;
+        const closeServer = () => { try { server.close(); } catch (e) { /* already closed */ } };
+        resolve({ code, closeServer });
+      }
     });
 
     server.listen(CALLBACK_PORT, () => {
@@ -171,6 +217,103 @@ export function waitForCallback(expectedState, timeoutMs = 120000) {
 }
 
 /**
+ * Prompt the user to paste the redirect URL manually.
+ * Fallback for environments where the local callback server cannot receive
+ * the redirect (WSL, SSH, Docker, remote machines).
+ *
+ * @param {string} expectedState - The expected state parameter
+ * @returns {Promise<string>} The authorization code from the pasted URL
+ */
+async function promptManualPaste(expectedState) {
+  console.log(chalk.yellow('\n  Local callback not received yet.'));
+  console.log(chalk.gray('  If your browser redirected but the CLI did not pick it up,'));
+  console.log(chalk.gray('  copy the full URL from your browser address bar and paste it below.\n'));
+
+  const { redirectUrl } = await inquirer.prompt([
+    {
+      type: 'input',
+      name: 'redirectUrl',
+      message: 'Paste the redirect URL (or press Enter to keep waiting):',
+      validate: (input) => {
+        if (!input || !input.trim()) return true; // empty = keep waiting
+        try {
+          const url = new URL(input.trim());
+          if (!url.searchParams.get('code')) {
+            return 'URL must contain a "code" parameter';
+          }
+          return true;
+        } catch {
+          return 'Invalid URL — paste the full URL starting with http://';
+        }
+      }
+    }
+  ]);
+
+  if (!redirectUrl || !redirectUrl.trim()) {
+    // User pressed Enter — signal that they want to keep waiting
+    return null;
+  }
+
+  const url = new URL(redirectUrl.trim());
+  const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+
+  if (state && state !== expectedState) {
+    throw new Error('OAuth state mismatch from pasted URL — possible session confusion');
+  }
+
+  return code;
+}
+
+/**
+ * Wait for the OAuth callback with a manual paste fallback.
+ *
+ * Strategy: Start the local callback server immediately. After a delay,
+ * show a prompt allowing the user to paste the redirect URL manually.
+ * The first to resolve wins.
+ *
+ * @param {string} state - Expected state parameter
+ * @param {string} codeVerifier - PKCE code verifier (unused here, passed for context)
+ * @returns {Promise<string>} The authorization code
+ */
+async function waitForCallbackWithFallback(state) {
+  // Start the local callback server
+  const callbackPromise = waitForCallback(state).then((result) => {
+    return { source: 'server', code: result.code, closeServer: result.closeServer };
+  });
+
+  // After a delay, offer the paste fallback
+  const pastePromise = (async () => {
+    await sleep(PASTE_FALLBACK_DELAY_MS);
+
+    // Loop: keep asking until user provides a code or callback server resolves
+    while (true) {
+      const code = await promptManualPaste(state);
+      if (code) {
+        return { source: 'paste', code, closeServer: null };
+      }
+      // User pressed Enter — wait a bit more and ask again
+      console.log(chalk.gray('  Still waiting for callback...'));
+      await sleep(5000);
+    }
+  })();
+
+  // Race: whichever resolves first wins
+  const result = await Promise.race([callbackPromise, pastePromise]);
+
+  // Clean up the callback server if paste won
+  if (result.source === 'paste') {
+    // The server promise is still pending — it will time out eventually.
+    // We cannot easily kill it from here since waitForCallback returns a
+    // promise, but the 120s timeout will clean it up.
+  } else if (result.closeServer) {
+    result.closeServer();
+  }
+
+  return result.code;
+}
+
+/**
  * Exchange an authorization code for access and refresh tokens.
  *
  * @param {string} code - Authorization code from the callback
@@ -180,6 +323,7 @@ export function waitForCallback(expectedState, timeoutMs = 120000) {
 export async function exchangeCodeForTokens(code, codeVerifier) {
   const body = new URLSearchParams({
     client_id: CLIENT_ID,
+    client_secret: CLIENT_SECRET,
     code,
     code_verifier: codeVerifier,
     grant_type: 'authorization_code',
@@ -209,6 +353,7 @@ export async function exchangeCodeForTokens(code, codeVerifier) {
 export async function refreshAccessToken(refreshToken) {
   const body = new URLSearchParams({
     client_id: CLIENT_ID,
+    client_secret: CLIENT_SECRET,
     refresh_token: refreshToken,
     grant_type: 'refresh_token'
   });
@@ -228,23 +373,29 @@ export async function refreshAccessToken(refreshToken) {
 }
 
 /**
- * Discover the user's Cloud project ID by listing projects with the access token.
- * Falls back to null if the user has no projects or the API call fails.
+ * Discover the user's Cloud project ID via the Antigravity loadCodeAssist endpoint.
+ * Falls back to the hardcoded default project if the call fails.
  *
  * @param {string} accessToken
- * @returns {Promise<string|null>} The first project ID or null
+ * @returns {Promise<string>} The project ID (never null — always returns a value)
  */
 export async function discoverProjectId(accessToken) {
   try {
-    const resp = await fetch('https://cloudresourcemanager.googleapis.com/v1/projects?pageSize=1', {
-      headers: { Authorization: `Bearer ${accessToken}` }
+    const resp = await fetch(`${SANDBOX_BASE_URL}/v1internal:loadCodeAssist`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'User-Agent': 'antigravity/dynamictester',
+        'X-Goog-Api-Client': 'google-cloud-sdk vscode_cloudshelleditor/0.1'
+      },
+      body: JSON.stringify({})
     });
-    if (!resp.ok) return null;
+    if (!resp.ok) return DEFAULT_PROJECT_ID;
     const data = await resp.json();
-    const project = data.projects?.[0];
-    return project?.projectId || null;
+    return data.projectId || DEFAULT_PROJECT_ID;
   } catch (e) {
-    return null;
+    return DEFAULT_PROJECT_ID;
   }
 }
 
@@ -262,7 +413,8 @@ export function isTokenValid(tokenData) {
 
 /**
  * Run the full Antigravity OAuth flow interactively.
- * Opens the browser for consent, receives the callback, exchanges tokens.
+ * Opens the browser for consent, receives the callback (with manual paste
+ * fallback for WSL/SSH/Docker), exchanges tokens, discovers project ID.
  *
  * @returns {Promise<object>} Token data ready for storage:
  *   { accessToken, refreshToken, expiresAt, projectId }
@@ -274,7 +426,8 @@ export async function runAntigravityOAuthFlow() {
 
   console.log(chalk.cyan('\nOpen this URL in your browser to authenticate:'));
   console.log(chalk.white.underline(authUrl));
-  console.log(chalk.gray(`\nWaiting for callback on http://localhost:${CALLBACK_PORT} ...`));
+  console.log(chalk.gray(`\nWaiting for callback on ${REDIRECT_URI} ...`));
+  console.log(chalk.gray('(If the callback does not arrive automatically, you will be prompted to paste the URL.)'));
 
   // Try to auto-open the URL
   try {
@@ -285,7 +438,8 @@ export async function runAntigravityOAuthFlow() {
     exec(`${cmd} "${authUrl}"`);
   } catch (e) { /* User can open manually */ }
 
-  const code = await waitForCallback(state);
+  // Wait for callback with paste fallback
+  const code = await waitForCallbackWithFallback(state);
   console.log(chalk.green('Authorization code received.'));
 
   console.log(chalk.gray('Exchanging code for tokens...'));
@@ -293,12 +447,10 @@ export async function runAntigravityOAuthFlow() {
 
   const expiresAt = Date.now() + (tokens.expires_in * 1000);
 
-  // Discover project ID (best-effort)
+  // Discover project ID (best-effort — always returns a value)
   console.log(chalk.gray('Discovering project ID...'));
   const projectId = await discoverProjectId(tokens.access_token);
-  if (projectId) {
-    console.log(chalk.gray(`Project: ${projectId}`));
-  }
+  console.log(chalk.gray(`Project: ${projectId}`));
 
   return {
     accessToken: tokens.access_token,

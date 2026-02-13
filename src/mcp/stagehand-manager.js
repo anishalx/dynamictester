@@ -106,11 +106,13 @@ export class StagehandManager {
   /**
    * @param {object} [options]
    * @param {string} [options.stagehandModel='openai/gpt-4o'] - Model for Stagehand AI operations (provider/model format).
-   *   Stagehand uses its own OPENAI_API_KEY from env — this only affects which model is called.
+   * @param {object} [options.modelClientOptions={}] - Custom API key / baseURL for the model provider.
    */
   constructor(options = {}) {
     /** @type {string} */
     this._stagehandModel = options.stagehandModel || 'openai/gpt-4o';
+    /** @type {object} */
+    this._modelClientOptions = options.modelClientOptions || {};
     /** @type {import('@browserbasehq/stagehand').Stagehand|null} */
     this.stagehand = null;
     /** @type {import('playwright').Browser|null} */
@@ -132,6 +134,7 @@ export class StagehandManager {
     this.stagehand = new Stagehand({
       env: 'LOCAL',
       model: this._stagehandModel,
+      modelClientOptions: this._modelClientOptions,
       localBrowserLaunchOptions: {
         headless: true,
         viewport: { width: 1280, height: 720 },

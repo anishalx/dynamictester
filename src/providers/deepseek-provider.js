@@ -56,28 +56,6 @@ export class DeepSeekProvider extends BaseProvider {
       }
     ]);
 
-    // Validate
-    try {
-      console.log(chalk.gray('Validating API key...'));
-      const client = new OpenAI({
-        apiKey: apiKey.trim(),
-        baseURL: DEEPSEEK_BASE_URL
-      });
-      await client.models.list();
-      console.log(chalk.green('API key validated successfully.'));
-    } catch (e) {
-      console.log(chalk.red(`Validation failed: ${e.message}`));
-      const { proceed } = await inquirer.prompt([
-        {
-          type: 'confirm',
-          name: 'proceed',
-          message: 'Save the key anyway?',
-          default: false
-        }
-      ]);
-      if (!proceed) return false;
-    }
-
     await setProviderConfig('deepseek', { apiKey: apiKey.trim() });
     console.log(chalk.green('DeepSeek credentials saved.'));
     return true;
