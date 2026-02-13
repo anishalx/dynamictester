@@ -32,6 +32,10 @@ import {
 const args = process.argv.slice(2);
 const subcommand = args[0];
 
+// Parse --provider and --model CLI flags (e.g. --provider=copilot --model=gpt-4o)
+const cliProvider = args.find(a => a.startsWith('--provider='))?.split('=')[1];
+const cliModel = args.find(a => a.startsWith('--model='))?.split('=')[1];
+
 if (subcommand === 'auth') {
   const action = args[1]; // login | status | logout
   if (action === 'login') {
@@ -93,7 +97,7 @@ async function authLogin() {
     ]);
 
     if (setAsDefault) {
-      const models = provider.getModels();
+      const models = await provider.getModels();
       const { modelId } = await inquirer.prompt([
         {
           type: 'list',
@@ -385,9 +389,10 @@ async function main() {
 /**
  * Prompt the user to select an LLM provider and model.
  * Handles auto-selection when only one provider is available,
- * and backward-compatible env-var fallback.
+ * backward-compatible env-var fallback, CLI flag overrides,
+ * and validates stored default models.
  *
- * @returns {Promise<{providerName: string, modelId: string, client: import('openai').default}>}
+ * @returns {Promise<{providerName: string, modelId: string, client: import('openai').default, providerConfig: object}>}
  */
 async function selectProviderAndModel() {
   const config = await loadConfig();
@@ -399,7 +404,7 @@ async function selectProviderAndModel() {
     const provider = getProvider('openai');
     const providerConfig = { apiKey: process.env.OPENAI_API_KEY };
     const client = provider.createClient(providerConfig);
-    return { providerName: 'openai', modelId: 'gpt-4o', client, providerConfig };
+    return { providerName: 'openai', modelId: cliModel || 'gpt-4o', client, providerConfig };
   }
 
   if (configured.length === 0) {
@@ -407,6 +412,22 @@ async function selectProviderAndModel() {
     console.log(chalk.gray('Run: node src/main.js auth login'));
     console.log(chalk.gray('Or set OPENAI_API_KEY environment variable.'));
     process.exit(1);
+  }
+
+  // CLI flag override: --provider=xxx --model=xxx
+  if (cliProvider) {
+    const providerExists = configured.some(p => p.name === cliProvider);
+    if (!providerExists) {
+      console.log(chalk.red(`\nProvider "${cliProvider}" is not configured.`));
+      console.log(chalk.gray('Configured providers: ' + configured.map(p => p.name).join(', ')));
+      process.exit(1);
+    }
+    const provider = getProvider(cliProvider);
+    const providerConfig = await getProviderConfig(cliProvider);
+    const client = await createClientForProvider(cliProvider);
+    const modelId = cliModel || provider.getDefaultModel();
+    console.log(chalk.gray(`\nUsing CLI override: ${cliProvider}/${modelId}`));
+    return { providerName: cliProvider, modelId, client, providerConfig };
   }
 
   let providerName;
@@ -419,18 +440,29 @@ async function selectProviderAndModel() {
   } else {
     // Check for stored default
     if (config.defaultProvider && config.defaultModel) {
-      const { useDefault } = await inquirer.prompt([
-        {
-          type: 'confirm',
-          name: 'useDefault',
-          message: `Use default provider ${config.defaultProvider}/${config.defaultModel}?`,
-          default: true
+      // Validate that the stored default model is still valid
+      const defaultProvider = getProvider(config.defaultProvider);
+      const isValid = defaultProvider.isValidModel
+        ? defaultProvider.isValidModel(config.defaultModel)
+        : true; // Providers without isValidModel are assumed valid
+
+      if (isValid) {
+        const { useDefault } = await inquirer.prompt([
+          {
+            type: 'confirm',
+            name: 'useDefault',
+            message: `Use default provider ${config.defaultProvider}/${config.defaultModel}?`,
+            default: true
+          }
+        ]);
+        if (useDefault) {
+          const providerConfig = await getProviderConfig(config.defaultProvider);
+          const client = await createClientForProvider(config.defaultProvider);
+          return { providerName: config.defaultProvider, modelId: config.defaultModel, client, providerConfig };
         }
-      ]);
-      if (useDefault) {
-        const providerConfig = await getProviderConfig(config.defaultProvider);
-        const client = await createClientForProvider(config.defaultProvider);
-        return { providerName: config.defaultProvider, modelId: config.defaultModel, client, providerConfig };
+      } else {
+        console.log(chalk.yellow(`\nStored default model "${config.defaultModel}" is no longer valid for ${config.defaultProvider}.`));
+        console.log(chalk.gray('Please select a new model.\n'));
       }
     }
 
@@ -449,23 +481,28 @@ async function selectProviderAndModel() {
     providerName = selectedProvider;
   }
 
-  // Step 2: Select model
+  // Step 2: Select model (await since getModels() may be async for Google)
   const provider = getProvider(providerName);
-  const models = provider.getModels();
+  const models = await provider.getModels();
 
-  const { selectedModel } = await inquirer.prompt([
-    {
-      type: 'list',
-      name: 'selectedModel',
-      message: 'Select model:',
-      choices: models.map(m => ({
-        name: `${m.name} — ${m.description}`,
-        value: m.id
-      })),
-      default: provider.getDefaultModel()
-    }
-  ]);
-  modelId = selectedModel;
+  // If --model flag was provided, use it directly
+  if (cliModel) {
+    modelId = cliModel;
+  } else {
+    const { selectedModel } = await inquirer.prompt([
+      {
+        type: 'list',
+        name: 'selectedModel',
+        message: 'Select model:',
+        choices: models.map(m => ({
+          name: `${m.name} — ${m.description}`,
+          value: m.id
+        })),
+        default: provider.getDefaultModel()
+      }
+    ]);
+    modelId = selectedModel;
+  }
 
   const providerConfig = await getProviderConfig(providerName);
   const client = await createClientForProvider(providerName);

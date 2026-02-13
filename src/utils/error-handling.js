@@ -230,10 +230,18 @@ export function classifyError(error) {
     return 'NETWORK_ERROR';
   }
 
-  // Auth errors
-  if (status === 401 || status === 403 ||
-      /\bunauthorized\b/i.test(message) ||
+  // Auth errors — distinguish between token issues and ToS/permission blocks
+  if (status === 401 ||
+      /\bunauthorized\b/i.test(message)) {
+    return 'AUTH_ERROR';
+  }
+
+  if (status === 403 ||
       /\bforbidden\b/i.test(message)) {
+    // Antigravity-specific: ToS violation is a distinct terminal error
+    if (/terms of service/i.test(message) || /permission.denied/i.test(message)) {
+      return 'TOS_ERROR';
+    }
     return 'AUTH_ERROR';
   }
 

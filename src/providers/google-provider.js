@@ -37,15 +37,68 @@ export class GoogleProvider extends BaseProvider {
   }
 
   /**
+   * Standard Gemini models available via API key.
    * @returns {import('./provider-interface.js').ModelInfo[]}
+   * @private
    */
-  getModels() {
+  _getGeminiModels() {
     return [
-      // Gemini models (available via both auth modes)
       { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Fast, multimodal, 1M context' },
       { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', description: 'Best Gemini model, 1M context' },
       { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', description: 'Previous gen fast model' }
     ];
+  }
+
+  /**
+   * Models available through Antigravity OAuth (Claude, Gemini 3, GPT-OSS).
+   * These use dashes in version numbers (e.g. claude-sonnet-4-5, NOT claude-sonnet-4.5).
+   * @returns {import('./provider-interface.js').ModelInfo[]}
+   * @private
+   */
+  _getAntigravityModels() {
+    return [
+      { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', description: 'Anthropic Sonnet via Google (fast, capable)' },
+      { id: 'claude-sonnet-4-5-thinking', name: 'Claude Sonnet 4.5 Thinking', description: 'Sonnet 4.5 with extended thinking' },
+      { id: 'claude-opus-4-5-thinking', name: 'Claude Opus 4.5 Thinking', description: 'Anthropic Opus via Google (strongest)' },
+      { id: 'claude-opus-4-6-thinking', name: 'Claude Opus 4.6 Thinking', description: 'Latest Opus with extended thinking' },
+      { id: 'gemini-3-pro-high', name: 'Gemini 3 Pro High', description: 'Gemini 3 Pro, high quality setting' },
+      { id: 'gemini-3-pro-low', name: 'Gemini 3 Pro Low', description: 'Gemini 3 Pro, low latency setting' },
+      { id: 'gpt-oss-120b-medium', name: 'GPT-OSS 120B Medium', description: 'Open-source GPT 120B via Google' }
+    ];
+  }
+
+  /**
+   * Return models based on the current auth mode.
+   * Antigravity mode shows both Gemini and Antigravity-exclusive models.
+   * API key mode shows only standard Gemini models.
+   *
+   * @returns {import('./provider-interface.js').ModelInfo[]}
+   */
+  async getModels() {
+    const config = await getProviderConfig('google');
+    if (config?.authMode === 'antigravity') {
+      return [...this._getAntigravityModels(), ...this._getGeminiModels()];
+    }
+    return this._getGeminiModels();
+  }
+
+  /**
+   * Synchronous model list for contexts where async is not available.
+   * Returns the full combined list (safe superset).
+   * @returns {import('./provider-interface.js').ModelInfo[]}
+   */
+  getModelsSync() {
+    return [...this._getAntigravityModels(), ...this._getGeminiModels()];
+  }
+
+  /**
+   * Check if a model ID is valid for this provider.
+   * @param {string} modelId
+   * @returns {boolean}
+   */
+  isValidModel(modelId) {
+    const allModels = this.getModelsSync();
+    return allModels.some(m => m.id === modelId);
   }
 
   getDefaultModel() {

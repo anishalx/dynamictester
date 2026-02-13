@@ -2,7 +2,6 @@ import OpenAI from 'openai';
 import { fs, path } from 'zx';
 import chalk from 'chalk';
 import { BrowserManager } from '../mcp/browser-server.js';
-import { StagehandManager } from '../mcp/stagehand-manager.js';
 import { 
   RateLimiter, 
   isRateLimitError, 
@@ -37,110 +36,6 @@ function truncateResult(obj, maxLen = MAX_TOOL_RESULT_LENGTH) {
   }
   
   return str.slice(0, maxLen) + '... [TRUNCATED]';
-}
-
-/**
- * Qwen / DashScope region endpoints (duplicated from qwen-provider.js to avoid
- * circular imports — the Stagehand config builder needs these at runtime).
- * @type {Record<string, string>}
- */
-const QWEN_ENDPOINTS = Object.freeze({
-  international: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
-  us: 'https://dashscope-us.aliyuncs.com/compatible-mode/v1',
-  china: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-});
-
-/**
- * Build Stagehand model configuration from provider info.
- * Maps each provider to a Stagehand-compatible model format + client options.
- *
- * Stagehand supports AI SDK `provider/model` format with optional
- * `modelClientOptions` for custom API keys and base URLs.
- *
- * @param {string} providerName - Provider key
- * @param {string} model - Model ID (e.g. 'gpt-4o', 'deepseek-chat')
- * @param {object} providerConfig - Stored provider config
- * @returns {{ stagehandModel: string, modelClientOptions: object, disableAI: boolean }}
- */
-function buildStagehandConfig(providerName, model, providerConfig) {
-  switch (providerName) {
-    case 'openai':
-      return {
-        stagehandModel: `openai/${model}`,
-        modelClientOptions: providerConfig?.apiKey
-          ? { apiKey: providerConfig.apiKey }
-          : {},
-        disableAI: false
-      };
-
-    case 'deepseek':
-      return {
-        stagehandModel: `openai/${model}`,
-        modelClientOptions: {
-          apiKey: providerConfig?.apiKey || process.env.DEEPSEEK_API_KEY,
-          baseURL: 'https://api.deepseek.com'
-        },
-        disableAI: false
-      };
-
-    case 'qwen': {
-      const region = providerConfig?.region || 'international';
-      return {
-        stagehandModel: `openai/${model}`,
-        modelClientOptions: {
-          apiKey: providerConfig?.apiKey || process.env.DASHSCOPE_API_KEY,
-          baseURL: QWEN_ENDPOINTS[region] || QWEN_ENDPOINTS.international
-        },
-        disableAI: false
-      };
-    }
-
-    case 'github':
-      return {
-        stagehandModel: `openai/${model}`,
-        modelClientOptions: {
-          apiKey: providerConfig?.token || process.env.GITHUB_TOKEN,
-          baseURL: 'https://models.inference.ai.azure.com'
-        },
-        disableAI: false
-      };
-
-    case 'google':
-      if (providerConfig?.authMode === 'antigravity') {
-        // Antigravity API is NOT OpenAI-compatible — Stagehand cannot use it.
-        // Disable Stagehand AI features; fall back to basic Playwright only.
-        return {
-          stagehandModel: 'openai/gpt-4o',
-          modelClientOptions: {},
-          disableAI: true
-        };
-      }
-      // Standard Gemini API key — Stagehand supports the google provider
-      return {
-        stagehandModel: `google/${model}`,
-        modelClientOptions: {
-          apiKey: providerConfig?.apiKey || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY
-        },
-        disableAI: false
-      };
-
-    case 'copilot':
-      return {
-        stagehandModel: `openai/${model}`,
-        modelClientOptions: {
-          apiKey: providerConfig?.token || process.env.GITHUB_COPILOT_TOKEN,
-          baseURL: 'https://api.githubcopilot.com'
-        },
-        disableAI: false
-      };
-
-    default:
-      return {
-        stagehandModel: `openai/${model}`,
-        modelClientOptions: {},
-        disableAI: false
-      };
-  }
 }
 
 /**
@@ -180,9 +75,11 @@ export async function executeExploitationAgent(
   
   // Load queue data
   let queueData = {};
+  let totalVulnerabilities = 0;
   try {
     queueData = await fs.readJSON(queuePath);
-    console.log(chalk.gray(`   Loaded ${queueData.vulnerabilities?.length || 0} vulnerabilities from queue`));
+    totalVulnerabilities = queueData.vulnerabilities?.length || 0;
+    console.log(chalk.gray(`   Loaded ${totalVulnerabilities} vulnerabilities from queue`));
   } catch (e) {
     console.log(chalk.yellow(`   Warning: Could not load queue file: ${e.message}`));
   }
@@ -245,60 +142,15 @@ TOOL USAGE:
 - browser_force_click: Use when normal click times out
 - save_evidence: Include full source mapping (file, line, column)
 
-AI BROWSER TOOLS (Stagehand):
-- stagehand_act: AI-powered click/fill/interact — use when exact CSS selectors are unknown or page is dynamic/SPA
-- stagehand_extract: AI-powered data extraction — use to parse complex pages, extract error messages or form structures
-- stagehand_observe: AI-powered element discovery — use to map attack surface on unfamiliar pages, find injection points
-- stagehand_agent: AI-powered multi-step workflow — use for login sequences, multi-page flows, CSRF token harvesting
-
-WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
-- Use browser_http_request for direct API/REST testing (fastest, no browser needed)
-- Use browser_click/browser_fill when you HAVE exact CSS selectors
-- Use stagehand_act when selectors are unknown, elements are dynamic, or previous browser_click/fill failed
-- Use stagehand_extract to intelligently parse complex response pages
-- Use stagehand_observe to discover interactive elements on unfamiliar pages`;
+COMPLETION:
+- You are NOT done until you have called save_evidence for EVERY vulnerability
+- Do NOT stop after just reading the queue — you must test each vulnerability
+- Do NOT respond with text-only messages — always make tool calls`;
   
   // ---------------------------------------------------------------------------
-  // Initialize Stagehand (AI browser) → pass page/context to BrowserManager
+  // Initialize Playwright browser for dynamic testing
   // ---------------------------------------------------------------------------
-  const stagehandConfig = buildStagehandConfig(providerName, model, providerConfig);
-  let stagehandManager = null;
-  let browserManager;
-
-  if (stagehandConfig.disableAI) {
-    // Provider (e.g. Antigravity) is incompatible with Stagehand — use standalone Playwright
-    console.log(chalk.gray('   Stagehand AI disabled (incompatible provider) — using standalone Playwright'));
-    browserManager = new BrowserManager();
-  } else {
-    stagehandManager = new StagehandManager({
-      stagehandModel: stagehandConfig.stagehandModel,
-      modelClientOptions: stagehandConfig.modelClientOptions
-    });
-
-    try {
-      console.log(chalk.gray(`   Initializing Stagehand AI browser (${stagehandConfig.stagehandModel})...`));
-      await stagehandManager.init();
-      const stagehandPage = stagehandManager.getPage();
-      const stagehandContext = stagehandManager.getContext();
-      const stagehandBrowser = stagehandManager.getBrowser();
-
-      if (stagehandPage && stagehandContext) {
-        browserManager = new BrowserManager({
-          page: stagehandPage,
-          context: stagehandContext,
-          browser: stagehandBrowser
-        });
-        console.log(chalk.green('   Stagehand initialized — CDP browser shared with BrowserManager'));
-      } else {
-        console.log(chalk.yellow('   Stagehand page not available — falling back to standalone browser'));
-        browserManager = new BrowserManager();
-      }
-    } catch (stagehandError) {
-      console.log(chalk.yellow(`   Stagehand init failed: ${stagehandError.message}`));
-      console.log(chalk.yellow('   Falling back to standalone Playwright browser'));
-      browserManager = new BrowserManager();
-    }
-  }
+  const browserManager = new BrowserManager();
   
   // Initialize testing utilities (shared across all tool calls within this agent)
   const payloadGenerator = new PayloadGenerator(model);
@@ -630,18 +482,9 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
   }
 
   const browserTools = browserManager.getTools();
-  const stagehandTools = stagehandManager ? stagehandManager.getTools() : [];
   
   const tools = [
     ...browserTools.map(t => ({
-      type: 'function',
-      function: {
-        name: t.name,
-        description: t.description,
-        parameters: t.parameters
-      }
-    })),
-    ...stagehandTools.map(t => ({
       type: 'function',
       function: {
         name: t.name,
@@ -782,8 +625,7 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
     generate_payloads,
     analyze_response,
     generate_bypasses,
-    ...Object.fromEntries(browserTools.map(t => [t.name, t.handler])),
-    ...Object.fromEntries(stagehandTools.map(t => [t.name, t.handler]))
+    ...Object.fromEntries(browserTools.map(t => [t.name, t.handler]))
   };
 
   // Build initial user message with queue summary
@@ -795,7 +637,7 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
     { role: 'system', content: systemPrompt },
     { 
       role: 'user', 
-      content: `Target: ${targetUrl}\n\nVulnerabilities to test:\n${vulnSummary}\n\nStart testing. First call read_queue_file to get all vulnerabilities. For each vulnerability, call generate_payloads to get context-aware payloads before testing. After each test request, call analyze_response to interpret results. If blocked, call generate_bypasses for alternatives.` 
+      content: `Target: ${targetUrl}\n\nVulnerabilities to test (${totalVulnerabilities} total):\n${vulnSummary}\n\nYou MUST test ALL ${totalVulnerabilities} vulnerabilities. Follow this workflow for EACH one:\n1. Call read_queue_file to load the full vulnerability queue\n2. For each vulnerability: call generate_payloads with stage="confirmation"\n3. Use browser_http_request to send test payloads to the target\n4. Call analyze_response to interpret the result\n5. If blocked, call generate_bypasses and retry\n6. Call save_evidence with the results (REQUIRED for every vulnerability)\n\nDo NOT stop until you have called save_evidence for every vulnerability. Start by calling read_queue_file NOW.` 
     }
   ];
 
@@ -803,10 +645,16 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
   const maxTurns = 50; // Increased from 30 to allow thorough testing
   let consecutiveErrors = 0;
   const maxConsecutiveErrors = 5;
+  let consecutiveNudges = 0;
+  const maxNudges = 3; // Max times to nudge model before accepting it's done
+  let evidenceSavedCount = 0; // Track how many vulnerabilities have been tested
 
   try {
     while (turnCount < maxTurns) {
       console.log(chalk.blue(`\n🤖 Turn ${turnCount + 1}:`));
+
+      // Force tool use until evidence has been saved; use 'auto' once testing has started
+      let effectiveToolChoice = (evidenceSavedCount === 0) ? 'required' : 'auto';
 
       // Use rate limiter for API call with retry logic
       let response;
@@ -817,7 +665,7 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
               model: model,
               messages: messages,
               tools: tools,
-              tool_choice: 'auto',
+              tool_choice: effectiveToolChoice,
               max_tokens: 4096,
               temperature: 0.2,
             });
@@ -829,40 +677,77 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
         turnCount++;
         consecutiveErrors = 0; // Reset on success
       } catch (apiError) {
-        consecutiveErrors++;
-        console.log(chalk.red(`   ❌ API call failed: ${apiError.message}`));
-        
-        // Auth errors (401/403) are fatal — no point retrying a banned/invalid key
-        const errorType = classifyError(apiError);
-        if (errorType === 'AUTH_ERROR') {
-          console.log(chalk.red(`\n   ❌ Authentication/authorization error — stopping agent immediately`));
-          console.log(chalk.yellow(`\n   Possible actions:`));
-          console.log(chalk.yellow(`      • Re-authenticate: node src/main.js auth login`));
-          console.log(chalk.yellow(`      • Switch to a different provider or account`));
-          console.log(chalk.yellow(`      • Check provider dashboard for account status`));
-          break;
-        }
-
-        if (consecutiveErrors >= maxConsecutiveErrors) {
-          const isQuota = isRateLimitError(apiError);
-          console.log(chalk.red(`\n   ❌ Too many consecutive errors (${maxConsecutiveErrors}), stopping agent`));
-          if (isQuota) {
-            console.log(chalk.yellow(`\n   Provider quota exhausted (${providerName}). Possible actions:`));
-            console.log(chalk.yellow(`      • Wait and retry later`));
-            console.log(chalk.yellow(`      • Switch to a different provider: node src/main.js auth login`));
-            console.log(chalk.yellow(`      • Check your quota/billing at the provider dashboard`));
+        // If 'required' tool_choice is not supported, fall back to 'auto'
+        if (effectiveToolChoice === 'required' && 
+            (apiError.message?.includes('tool_choice') || apiError.status === 400)) {
+          console.log(chalk.yellow(`   ⚠️ tool_choice "required" not supported — falling back to "auto"`));
+          effectiveToolChoice = 'auto';
+          try {
+            response = await rateLimiter.executeWithRetry(
+              async () => {
+                return await llmClient.chat.completions.create({
+                  model: model,
+                  messages: messages,
+                  tools: tools,
+                  tool_choice: 'auto',
+                  max_tokens: 4096,
+                  temperature: 0.2,
+                });
+              },
+              `${providerName} API request fallback (turn ${turnCount + 1})`,
+              { maxRetries }
+            );
+            turnCount++;
+            consecutiveErrors = 0;
+          } catch (fallbackError) {
+            consecutiveErrors++;
+            console.log(chalk.red(`   ❌ API call failed (fallback): ${fallbackError.message}`));
+            continue;
           }
-          break;
+          // Fall through to response processing below
+        } else {
+          consecutiveErrors++;
+          console.log(chalk.red(`   ❌ API call failed: ${apiError.message}`));
+          
+          // Auth errors (401/403) are fatal — no point retrying a banned/invalid key
+          const errorType = classifyError(apiError);
+          if (errorType === 'AUTH_ERROR' || errorType === 'TOS_ERROR') {
+            const isTos = errorType === 'TOS_ERROR';
+            console.log(chalk.red(`\n   ❌ ${isTos ? 'Terms of Service violation' : 'Authentication/authorization error'} — stopping agent immediately`));
+            console.log(chalk.yellow(`\n   Possible actions:`));
+            if (isTos) {
+              console.log(chalk.yellow(`      • Try a different Google account`));
+              console.log(chalk.yellow(`      • Use a Gemini API key instead of Antigravity OAuth`));
+              console.log(chalk.yellow(`      • Switch to GitHub Copilot provider`));
+            } else {
+              console.log(chalk.yellow(`      • Re-authenticate: node src/main.js auth login`));
+              console.log(chalk.yellow(`      • Switch to a different provider or account`));
+              console.log(chalk.yellow(`      • Check provider dashboard for account status`));
+            }
+            break;
+          }
+
+          if (consecutiveErrors >= maxConsecutiveErrors) {
+            const isQuota = isRateLimitError(apiError);
+            console.log(chalk.red(`\n   ❌ Too many consecutive errors (${maxConsecutiveErrors}), stopping agent`));
+            if (isQuota) {
+              console.log(chalk.yellow(`\n   Provider quota exhausted (${providerName}). Possible actions:`));
+              console.log(chalk.yellow(`      • Wait and retry later`));
+              console.log(chalk.yellow(`      • Switch to a different provider: node src/main.js auth login`));
+              console.log(chalk.yellow(`      • Check your quota/billing at the provider dashboard`));
+            }
+            break;
+          }
+          
+          // If rate limit, add extra cooldown
+          if (isRateLimitError(apiError)) {
+            const cooldown = 60000; // 1 minute cooldown
+            console.log(chalk.yellow(`   ⏳ Rate limit cooldown: waiting ${formatDelay(cooldown)}...`));
+            await sleep(cooldown);
+          }
+          
+          continue; // Try next turn
         }
-        
-        // If rate limit, add extra cooldown
-        if (isRateLimitError(apiError)) {
-          const cooldown = 60000; // 1 minute cooldown
-          console.log(chalk.yellow(`   ⏳ Rate limit cooldown: waiting ${formatDelay(cooldown)}...`));
-          await sleep(cooldown);
-        }
-        
-        continue; // Try next turn
       }
 
       // Guard against empty response (e.g., content filter refusal)
@@ -883,6 +768,7 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
       }
 
       if (assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0) {
+        consecutiveNudges = 0; // Reset nudge counter on successful tool call
         for (const toolCall of assistantMessage.tool_calls) {
           const toolName = toolCall.function.name;
           const handler = toolHandlers[toolName];
@@ -893,6 +779,12 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
               const args = JSON.parse(toolCall.function.arguments);
               const result = await handler(args);
               
+              // Track evidence saves for completion detection
+              if (toolName === 'save_evidence') {
+                evidenceSavedCount++;
+                console.log(chalk.cyan(`      📊 Evidence saved: ${evidenceSavedCount}/${totalVulnerabilities}`));
+              }
+
               // Truncate result for both display and API
               const truncatedResult = truncateResult(result);
               
@@ -925,13 +817,42 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
           }
         }
       } else {
-        // No more tool calls, agent is finished
-        console.log(chalk.green('\n   ✅ Agent completed its work'));
-        break;
+        // Model responded with text only — no tool calls
+        // Accept completion only if the agent has saved evidence for at least some vulnerabilities
+        if (evidenceSavedCount > 0) {
+          console.log(chalk.green(`\n   ✅ Agent completed its work (${evidenceSavedCount}/${totalVulnerabilities} vulnerabilities tested)`));
+          break;
+        }
+
+        // Agent has NOT saved any evidence — nudge it to keep working
+        consecutiveNudges++;
+        if (consecutiveNudges > maxNudges) {
+          console.log(chalk.red(`\n   ❌ Agent failed to test any vulnerabilities after ${maxNudges} nudges — aborting`));
+          console.log(chalk.yellow('   This may indicate the model/provider does not support function calling,'));
+          console.log(chalk.yellow('   or the target application is not accessible.'));
+          console.log(chalk.yellow('   Try a different model (e.g., gpt-4o) or check that the target URL is reachable.'));
+          break;
+        }
+
+        console.log(chalk.yellow(`\n   ⚠️ No tool calls received (nudge ${consecutiveNudges}/${maxNudges}) — agent has not tested any vulnerabilities yet`));
+
+        // Debug: log response structure to help diagnose tool calling issues
+        const finishReason = response.choices[0]?.finish_reason;
+        console.log(chalk.gray(`      finish_reason: ${finishReason}`));
+        console.log(chalk.gray(`      has tool_calls field: ${assistantMessage.tool_calls !== undefined}`));
+        console.log(chalk.gray(`      tool_choice was: ${effectiveToolChoice}`));
+
+        // Inject a nudge message to force the model to use tools
+        messages.push({
+          role: 'user',
+          content: `You have not tested any vulnerabilities yet. You MUST use tools NOW. Call read_queue_file to load the queue, then use browser_http_request to test each vulnerability, and call save_evidence for each one. There are ${totalVulnerabilities} vulnerabilities to test. Do not respond with text only — make tool calls.`
+        });
+        continue; // Re-enter the loop to retry with the nudge message
       }
 
-      // Check for stop reason
-      if (response.choices[0].finish_reason === 'stop') {
+      // Check for stop reason after tool execution — only break if we've done real work
+      if (response.choices[0].finish_reason === 'stop' && evidenceSavedCount > 0) {
+        console.log(chalk.green(`\n   ✅ Agent finished (${evidenceSavedCount}/${totalVulnerabilities} vulnerabilities tested)`));
         break;
       }
     }
@@ -954,6 +875,8 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
     return {
       success: true,
       turns: turnCount,
+      evidenceSaved: evidenceSavedCount,
+      totalVulnerabilities,
       errorStats
     };
     
@@ -966,9 +889,6 @@ WHEN TO USE STAGEHAND vs LOW-LEVEL TOOLS:
     };
   } finally {
     try { await browserManager.close(); } catch (e) { /* cleanup error */ }
-    if (stagehandManager) {
-      try { await stagehandManager.close(); } catch (e) { /* cleanup error */ }
-    }
   }
 }
 

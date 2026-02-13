@@ -1,4 +1,266 @@
-# Phase 2 Implementation Plan — Multi-Provider LLM Integration
+# Phase 3: Fix Agent Loop — Remove Stagehand, Fix Completion Logic
+
+## Overview
+
+The agent loop exits after 1-2 turns because:
+1. `hasExecutedAnyTool` becomes `true` after just `read_queue_file` — then any text-only response breaks the loop
+2. Stagehand adds 4 overlapping tools (24 total), is broken for Copilot, and adds complexity
+3. `finish_reason === 'stop'` check can break after tool execution on non-OpenAI providers
+4. No explicit completion criteria in prompts
+
+## File: `src/agents/executor.js`
+
+### Change 1: Remove Stagehand import (line 5)
+
+**Delete:**
+```js
+import { StagehandManager } from '../mcp/stagehand-manager.js';
+```
+
+### Change 2: Remove `buildStagehandConfig` function (lines 60-144)
+
+**Delete the entire function** `buildStagehandConfig` including the JSDoc and all switch cases. It's ~85 lines.
+
+### Change 3: Remove Stagehand initialization (lines 262-301)
+
+**Replace** this entire block:
+```js
+const stagehandConfig = buildStagehandConfig(providerName, model, providerConfig);
+let stagehandManager = null;
+let browserManager;
+
+if (stagehandConfig.disableAI) {
+  ...
+} else {
+  stagehandManager = new StagehandManager({...});
+  try {
+    ...
+  } catch (...) {
+    ...
+  }
+}
+```
+
+**With:**
+```js
+const browserManager = new BrowserManager();
+```
+
+### Change 4: Remove Stagehand tools from tools array (lines ~643-650)
+
+**Delete:**
+```js
+...stagehandTools.map(t => ({
+  type: 'function',
+  function: {
+    name: t.name,
+    description: t.description,
+    parameters: t.parameters
+  }
+})),
+```
+
+### Change 5: Remove Stagehand from tool handlers (lines ~785-786)
+
+Change the toolHandlers to remove the stagehandTools line:
+```js
+// BEFORE:
+const toolHandlers = {
+  save_evidence,
+  read_queue_file,
+  generate_payloads,
+  analyze_response,
+  generate_bypasses,
+  ...Object.fromEntries(browserTools.map(t => [t.name, t.handler])),
+  ...Object.fromEntries(stagehandTools.map(t => [t.name, t.handler]))
+};
+
+// AFTER:
+const toolHandlers = {
+  save_evidence,
+  read_queue_file,
+  generate_payloads,
+  analyze_response,
+  generate_bypasses,
+  ...Object.fromEntries(browserTools.map(t => [t.name, t.handler]))
+};
+```
+
+### Change 6: Remove Stagehand system prompt section (lines ~248-259)
+
+**Delete** the entire block from `AI BROWSER TOOLS (Stagehand):` to the end of `stagehand_observe` guidance.
+
+Replace with just a blank line or nothing.
+
+### Change 7: Remove Stagehand cleanup in `finally` (lines ~976-978)
+
+**Delete:**
+```js
+if (stagehandManager) {
+  try { await stagehandManager.close(); } catch (e) { /* cleanup error */ }
+}
+```
+
+### Change 8: Fix completion logic — Replace `hasExecutedAnyTool` with `evidenceSavedCount`
+
+**Replace:**
+```js
+let consecutiveNudges = 0;
+const maxNudges = 3;
+let hasExecutedAnyTool = false;
+```
+
+**With:**
+```js
+let consecutiveNudges = 0;
+const maxNudges = 3;
+let evidenceSavedCount = 0;
+const totalVulnerabilities = queueData.vulnerabilities?.length || 0;
+```
+
+### Change 9: Track evidence saves in tool execution
+
+In the tool execution block, after `const result = await handler(args);`, add:
+```js
+// Track evidence saves for completion detection
+if (toolName === 'save_evidence') {
+  evidenceSavedCount++;
+  console.log(chalk.cyan(`      📊 Evidence saved: ${evidenceSavedCount}/${totalVulnerabilities}`));
+}
+```
+
+Also remove the line `hasExecutedAnyTool = true;` (it was inside the `if (handler)` block).
+
+### Change 10: Fix the completion check in the `else` branch (no tool_calls)
+
+**Replace:**
+```js
+} else {
+  if (hasExecutedAnyTool) {
+    console.log(chalk.green('\n   ✅ Agent completed its work'));
+    break;
+  }
+
+  consecutiveNudges++;
+  if (consecutiveNudges > maxNudges) {
+    console.log(chalk.red(`\n   ❌ Agent failed to use tools after ${maxNudges} nudges — aborting`));
+    ...
+    break;
+  }
+
+  console.log(chalk.yellow(`\n   ⚠️ No tool calls received (nudge ${consecutiveNudges}/${maxNudges})...`));
+  ...
+  messages.push({
+    role: 'user',
+    content: 'You MUST use tools to test vulnerabilities...'
+  });
+  continue;
+}
+```
+
+**With:**
+```js
+} else {
+  // Model responded with text only — no tool calls
+  // Accept completion only if the agent has saved evidence for at least some vulnerabilities
+  if (evidenceSavedCount > 0) {
+    console.log(chalk.green(`\n   ✅ Agent completed its work (${evidenceSavedCount}/${totalVulnerabilities} vulnerabilities tested)`));
+    break;
+  }
+
+  // Agent has NOT saved any evidence — nudge it to keep working
+  consecutiveNudges++;
+  if (consecutiveNudges > maxNudges) {
+    console.log(chalk.red(`\n   ❌ Agent failed to test any vulnerabilities after ${maxNudges} nudges — aborting`));
+    console.log(chalk.yellow('   This may indicate the model/provider does not support function calling,'));
+    console.log(chalk.yellow('   or the target application is not accessible.'));
+    console.log(chalk.yellow('   Try a different model (e.g., gpt-4o) or check that the target URL is reachable.'));
+    break;
+  }
+
+  console.log(chalk.yellow(`\n   ⚠️ No tool calls received (nudge ${consecutiveNudges}/${maxNudges}) — agent has not tested any vulnerabilities yet`));
+
+  // Debug: log response structure
+  const finishReason = response.choices[0]?.finish_reason;
+  console.log(chalk.gray(`      finish_reason: ${finishReason}`));
+  console.log(chalk.gray(`      has tool_calls field: ${assistantMessage.tool_calls !== undefined}`));
+  console.log(chalk.gray(`      tool_choice was: ${effectiveToolChoice}`));
+
+  // Inject a nudge message
+  messages.push({
+    role: 'user',
+    content: `You have not tested any vulnerabilities yet. You MUST use tools NOW. Call read_queue_file to load the queue, then use browser_http_request to test each vulnerability, and call save_evidence for each one. There are ${totalVulnerabilities} vulnerabilities to test. Do not respond with text only — make tool calls.`
+  });
+  continue;
+}
+```
+
+### Change 11: Fix `tool_choice` to stay `'required'` until evidence is saved
+
+**Replace:**
+```js
+let effectiveToolChoice = (!hasExecutedAnyTool) ? 'required' : 'auto';
+```
+
+**With:**
+```js
+let effectiveToolChoice = (evidenceSavedCount === 0) ? 'required' : 'auto';
+```
+
+### Change 12: Fix `finish_reason === 'stop'` check
+
+**Replace:**
+```js
+// Check for stop reason (only reached after successful tool execution)
+if (response.choices[0].finish_reason === 'stop') {
+  // Model signalled stop after tool use — agent is done
+  console.log(chalk.green('\n   ✅ Agent finished (stop signal)'));
+  break;
+}
+```
+
+**With:**
+```js
+// Check for stop reason after tool execution — only break if we've done real work
+if (response.choices[0].finish_reason === 'stop' && evidenceSavedCount > 0) {
+  console.log(chalk.green(`\n   ✅ Agent finished (${evidenceSavedCount}/${totalVulnerabilities} vulnerabilities tested)`));
+  break;
+}
+```
+
+### Change 13: Strengthen user message (line ~798)
+
+**Replace:**
+```js
+content: `Target: ${targetUrl}\n\nVulnerabilities to test:\n${vulnSummary}\n\nStart testing. First call read_queue_file to get all vulnerabilities. For each vulnerability, call generate_payloads to get context-aware payloads before testing. After each test request, call analyze_response to interpret results. If blocked, call generate_bypasses for alternatives.`
+```
+
+**With:**
+```js
+content: `Target: ${targetUrl}\n\nVulnerabilities to test (${totalVulnerabilities} total):\n${vulnSummary}\n\nYou MUST test ALL ${totalVulnerabilities} vulnerabilities. Follow this workflow for EACH one:\n1. Call read_queue_file to load the full vulnerability queue\n2. For each vulnerability: call generate_payloads with stage="confirmation"\n3. Use browser_http_request to send test payloads to the target\n4. Call analyze_response to interpret the result\n5. If blocked, call generate_bypasses and retry\n6. Call save_evidence with the results (REQUIRED for every vulnerability)\n\nDo NOT stop until you have called save_evidence for every vulnerability. Start by calling read_queue_file NOW.`
+```
+
+### Change 14: Move `totalVulnerabilities` declaration before the user message
+
+Currently `totalVulnerabilities` is declared at line ~808. But the user message at line ~798 needs it. So declare it earlier:
+
+After `queueData = await fs.readJSON(queuePath);` (around line 184), add:
+```js
+const totalVulnerabilities = queueData.vulnerabilities?.length || 0;
+```
+
+And remove the duplicate declaration from the `let` block at line ~808.
+
+## Verification
+
+After all changes:
+1. `node --check src/agents/executor.js` — must pass
+2. `node -e "import('./src/agents/executor.js')"` — must import cleanly
+3. Run: `node src/main.js` with the same semgrep.json to verify the agent continues past Turn 2
+
+---
+
+# Phase 2 Implementation Plan — Multi-Provider LLM Integration (COMPLETED)
 
 ## Order: D → F → E → A → B → C
 

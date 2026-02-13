@@ -1,16 +1,81 @@
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
+import { platform, arch } from 'os';
 
 /**
- * Antigravity sandbox base URL.
+ * Antigravity endpoint URLs in fallback order.
+ * @type {string[]}
+ */
+const ANTIGRAVITY_ENDPOINTS = [
+  'https://daily-cloudcode-pa.sandbox.googleapis.com',
+  'https://cloudcode-pa.googleapis.com'
+];
+
+/**
+ * Antigravity sandbox base URL (default primary).
  * @type {string}
  */
-const DEFAULT_SANDBOX_URL = 'https://daily-cloudcode-pa.sandbox.googleapis.com';
+const DEFAULT_SANDBOX_URL = ANTIGRAVITY_ENDPOINTS[0];
 
 /**
  * Default project ID when none is configured.
+ * This fallback is used only if project discovery fails entirely.
  * @type {string}
  */
 const DEFAULT_PROJECT_ID = 'rising-fact-p41fc';
+
+/**
+ * Antigravity version string pool — randomized to blend in with legitimate clients.
+ * Matches the pattern used by the opencode-antigravity-auth plugin.
+ * @type {string[]}
+ */
+const ANTIGRAVITY_VERSIONS = [
+  '1.15.8',
+  '1.16.5',
+  '1.16.0'
+];
+
+/**
+ * X-Goog-Api-Client header value pool — randomized per session.
+ * @type {string[]}
+ */
+const API_CLIENT_VALUES = [
+  'google-cloud-sdk vscode_cloudshelleditor/0.1',
+  'google-cloud-sdk vscode/1.96.0',
+  'google-cloud-sdk vscode/1.95.0',
+  'google-cloud-sdk vscode/1.87.0',
+  'google-cloud-sdk vscode/1.86.0'
+];
+
+/**
+ * Map Node.js platform strings to Antigravity platform names.
+ * @type {Record<string, string>}
+ */
+const PLATFORM_MAP = {
+  linux: 'LINUX',
+  darwin: 'MACOS',
+  win32: 'WINDOWS'
+};
+
+/**
+ * Build a randomized User-Agent string matching the opencode plugin pattern.
+ * @returns {string}
+ */
+function buildUserAgent() {
+  const version = ANTIGRAVITY_VERSIONS[Math.floor(Math.random() * ANTIGRAVITY_VERSIONS.length)];
+  const plat = platform();
+  const archStr = arch();
+  // Match the pattern: antigravity/1.16.5 linux/x64
+  return `antigravity/${version} ${plat}/${archStr}`;
+}
+
+/**
+ * Pick a random value from an array.
+ * @param {string[]} arr
+ * @returns {string}
+ */
+function pickRandom(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
 
 /**
  * AntigravityClient — an adapter that exposes the same interface as the OpenAI
@@ -46,6 +111,15 @@ export class AntigravityClient {
     this._projectId = options.projectId || DEFAULT_PROJECT_ID;
     this._defaultModel = options.defaultModel || 'gemini-2.5-flash';
     this._sandboxUrl = options.sandboxUrl || DEFAULT_SANDBOX_URL;
+
+    // Generate a stable per-session fingerprint (matches opencode plugin behavior)
+    this._sessionFingerprint = {
+      deviceId: randomUUID(),
+      sessionToken: randomBytes(16).toString('hex'),
+      userAgent: buildUserAgent(),
+      apiClient: pickRandom(API_CLIENT_VALUES),
+      platform: PLATFORM_MAP[platform()] || 'LINUX'
+    };
 
     // Mimic OpenAI SDK interface: client.chat.completions.create(...)
     this.chat = {
@@ -366,36 +440,41 @@ export class AntigravityClient {
       generationConfig.maxOutputTokens = params.max_tokens;
     }
 
-    // Build request body
+    // Build the inner request (Gemini format)
+    const innerRequest = { contents };
+
+    if (systemInstruction) {
+      // Set role to 'user' for CLIProxyAPI compatibility (matches opencode plugin)
+      systemInstruction.role = 'user';
+      innerRequest.systemInstruction = systemInstruction;
+    }
+    if (Object.keys(generationConfig).length > 0) {
+      innerRequest.generationConfig = generationConfig;
+    }
+    if (geminiTools) {
+      innerRequest.tools = geminiTools;
+    }
+
+    // Build request body — Antigravity envelope format
+    // Matches the opencode-antigravity-auth plugin's prepareAntigravityRequest()
     const requestBody = {
       project: this._projectId,
       model,
-      request: {
-        contents
-      }
+      request: innerRequest,
+      requestType: 'agent',
+      userAgent: 'antigravity',
+      requestId: `agent-${randomUUID()}`
     };
 
-    if (systemInstruction) {
-      requestBody.request.systemInstruction = systemInstruction;
-    }
-    if (Object.keys(generationConfig).length > 0) {
-      requestBody.request.generationConfig = generationConfig;
-    }
-    if (geminiTools) {
-      requestBody.request.tools = geminiTools;
-    }
-
-    // Make the API call
+    // Build headers matching the opencode plugin's antigravity mode.
+    // IMPORTANT: In antigravity mode, only User-Agent is sent as an HTTP header
+    // for content requests. X-Goog-Api-Client and Client-Metadata are NOT sent
+    // as HTTP headers. The x-goog-user-project header is stripped to prevent 403.
     const url = `${this._sandboxUrl}/v1internal:generateContent`;
     const headers = {
       'Authorization': `Bearer ${this._accessToken}`,
       'Content-Type': 'application/json',
-      'User-Agent': 'antigravity/dynamictester',
-      'X-Goog-Api-Client': 'google-cloud-sdk vscode_cloudshelleditor/0.1',
-      'Client-Metadata': JSON.stringify({
-        ideType: 'ANTIGRAVITY',
-        ideVersion: '0.1'
-      })
+      'User-Agent': this._sessionFingerprint.userAgent
     };
 
     const resp = await fetch(url, {
@@ -406,18 +485,110 @@ export class AntigravityClient {
 
     if (!resp.ok) {
       const errorText = await resp.text();
-      const error = new Error(`Antigravity API error (${resp.status}): ${errorText}`);
-      error.status = resp.status;
-      error.type = resp.status === 429 ? 'rate_limit_error' : 'api_error';
+      const error = this._buildApiError(resp.status, errorText, model);
+
       // Attach headers so parseRetryAfter() in error-handling.js can use them
       const retryAfter = resp.headers.get('retry-after');
       if (retryAfter) {
         error.headers = { 'retry-after': retryAfter };
       }
+
+      // For 429: extract retry delay from Antigravity response body
+      if (resp.status === 429) {
+        try {
+          const errorData = JSON.parse(errorText);
+          const retryInfo = errorData.error?.details?.find(
+            d => d['@type']?.includes('RetryInfo')
+          );
+          if (retryInfo?.retryDelay) {
+            const seconds = parseFloat(retryInfo.retryDelay);
+            if (!isNaN(seconds)) {
+              error.headers = { ...error.headers, 'retry-after': String(seconds) };
+            }
+          }
+        } catch (e) { /* Not JSON or no retry info */ }
+      }
+
       throw error;
     }
 
     const geminiResponse = await resp.json();
-    return this._convertResponse(geminiResponse, model);
+
+    // Antigravity wraps responses: { response: { candidates: [...] }, traceId: ... }
+    const actualResponse = geminiResponse.response || geminiResponse;
+    return this._convertResponse(actualResponse, model);
+  }
+
+  /**
+   * Build a descriptive Error from an API error response.
+   * Provides actionable messages for common Antigravity error codes.
+   *
+   * @param {number} status - HTTP status code
+   * @param {string} errorText - Raw error response body
+   * @param {string} model - Model ID that was used
+   * @returns {Error}
+   * @private
+   */
+  _buildApiError(status, errorText, model) {
+    let message;
+    let errorData;
+
+    try {
+      errorData = JSON.parse(errorText);
+    } catch (e) {
+      errorData = null;
+    }
+
+    const apiMessage = errorData?.error?.message || errorText;
+    const apiStatus = errorData?.error?.status || '';
+
+    switch (status) {
+      case 400:
+        message = `Antigravity API error (400 INVALID_ARGUMENT): ${apiMessage}`;
+        if (/model/i.test(apiMessage)) {
+          message += `\n  Model "${model}" may not be available. Try a different model.`;
+        }
+        break;
+
+      case 401:
+        message = 'Antigravity API error (401 UNAUTHENTICATED): ' + apiMessage
+          + '\n  Your access token is invalid or expired.'
+          + '\n  Fix: Run "node src/main.js auth login" and select Google Antigravity.';
+        break;
+
+      case 403:
+        if (/terms of service/i.test(apiMessage) || /disabled/i.test(apiMessage)) {
+          message = 'Antigravity API error (403 PERMISSION_DENIED): ' + apiMessage
+            + '\n  Your account may be flagged for ToS violation.'
+            + '\n  Possible fixes:'
+            + '\n    1. Try a different Google account'
+            + '\n    2. Re-authenticate: node src/main.js auth login'
+            + '\n    3. Use a Gemini API key instead (simpler, more reliable)'
+            + '\n    4. Switch to GitHub Copilot provider';
+        } else {
+          message = 'Antigravity API error (403 PERMISSION_DENIED): ' + apiMessage
+            + '\n  You may not have access to this model or project.'
+            + '\n  Fix: Re-authenticate or try a different model.';
+        }
+        break;
+
+      case 404:
+        message = `Antigravity API error (404 NOT_FOUND): Model "${model}" not found.`
+          + '\n  Supported models: claude-sonnet-4-5, claude-opus-4-5-thinking, gemini-3-pro-low, gemini-3-pro-high';
+        break;
+
+      case 429:
+        message = 'Antigravity API error (429 RESOURCE_EXHAUSTED): ' + apiMessage
+          + '\n  Quota exhausted. The request will be retried automatically.';
+        break;
+
+      default:
+        message = `Antigravity API error (${status}${apiStatus ? ' ' + apiStatus : ''}): ${apiMessage}`;
+    }
+
+    const error = new Error(message);
+    error.status = status;
+    error.type = status === 429 ? 'rate_limit_error' : 'api_error';
+    return error;
   }
 }

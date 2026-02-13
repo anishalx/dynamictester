@@ -1,6 +1,7 @@
 import { createServer } from 'http';
 import { URL } from 'url';
-import { randomBytes, createHash } from 'crypto';
+import { randomBytes, createHash, randomUUID } from 'crypto';
+import { platform, arch } from 'os';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 
@@ -53,6 +54,28 @@ const SANDBOX_BASE_URL = 'https://daily-cloudcode-pa.sandbox.googleapis.com';
  * @type {string}
  */
 const DEFAULT_PROJECT_ID = 'rising-fact-p41fc';
+
+/**
+ * Production Antigravity endpoint.
+ * The opencode plugin tries production first, then falls back to sandbox/daily.
+ * @type {string}
+ */
+const PRODUCTION_BASE_URL = 'https://cloudcode-pa.googleapis.com';
+
+/**
+ * Antigravity version pool — randomized to match legitimate client patterns.
+ * @type {string[]}
+ */
+const ANTIGRAVITY_VERSIONS = ['1.15.8', '1.16.5', '1.16.0'];
+
+/**
+ * Build a randomized User-Agent string matching the opencode plugin pattern.
+ * @returns {string}
+ */
+function buildDiscoveryUserAgent() {
+  const version = ANTIGRAVITY_VERSIONS[Math.floor(Math.random() * ANTIGRAVITY_VERSIONS.length)];
+  return `antigravity/${version} ${platform()}/${arch()}`;
+}
 
 /**
  * Scopes required for Antigravity access.
@@ -373,30 +396,68 @@ export async function refreshAccessToken(refreshToken) {
 }
 
 /**
- * Discover the user's Cloud project ID via the Antigravity loadCodeAssist endpoint.
- * Falls back to the hardcoded default project if the call fails.
+ * Discover the user's Cloud project ID via Antigravity endpoints.
+ *
+ * Strategy (matching the opencode plugin):
+ * 1. Try `onboardUser` on production endpoint first
+ * 2. Try `loadCodeAssist` on production endpoint
+ * 3. Try both on sandbox endpoint
+ * 4. Fall back to the hardcoded default project
+ *
+ * Uses randomized User-Agent matching the opencode plugin pattern.
  *
  * @param {string} accessToken
  * @returns {Promise<string>} The project ID (never null — always returns a value)
  */
 export async function discoverProjectId(accessToken) {
-  try {
-    const resp = await fetch(`${SANDBOX_BASE_URL}/v1internal:loadCodeAssist`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        'User-Agent': 'antigravity/dynamictester',
-        'X-Goog-Api-Client': 'google-cloud-sdk vscode_cloudshelleditor/0.1'
-      },
-      body: JSON.stringify({})
-    });
-    if (!resp.ok) return DEFAULT_PROJECT_ID;
-    const data = await resp.json();
-    return data.projectId || DEFAULT_PROJECT_ID;
-  } catch (e) {
-    return DEFAULT_PROJECT_ID;
+  const userAgent = buildDiscoveryUserAgent();
+  const headers = {
+    'Authorization': `Bearer ${accessToken}`,
+    'Content-Type': 'application/json',
+    'User-Agent': userAgent
+  };
+
+  // Metadata for onboardUser (matches opencode plugin)
+  const onboardBody = JSON.stringify({
+    metadata: {
+      ideType: 'IDE_UNSPECIFIED',
+      platform: platform().toUpperCase() === 'DARWIN' ? 'MACOS' : platform().toUpperCase(),
+      pluginType: 'GEMINI'
+    }
+  });
+
+  // Try endpoints in order: production first (matches opencode plugin)
+  const endpoints = [PRODUCTION_BASE_URL, SANDBOX_BASE_URL];
+
+  for (const baseUrl of endpoints) {
+    // Try onboardUser first
+    try {
+      const resp = await fetch(`${baseUrl}/v1internal:onboardUser`, {
+        method: 'POST',
+        headers,
+        body: onboardBody
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.projectId) return data.projectId;
+      }
+    } catch (e) { /* Try next */ }
+
+    // Try loadCodeAssist
+    try {
+      const resp = await fetch(`${baseUrl}/v1internal:loadCodeAssist`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({})
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.projectId) return data.projectId;
+      }
+    } catch (e) { /* Try next */ }
   }
+
+  return DEFAULT_PROJECT_ID;
 }
 
 /**

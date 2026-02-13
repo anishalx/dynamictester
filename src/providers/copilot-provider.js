@@ -53,27 +53,113 @@ export class CopilotProvider extends BaseProvider {
   }
 
   /**
+   * Hardcoded model list — used as fallback when dynamic fetching fails.
+   * Updated from https://docs.github.com/en/copilot/reference/ai-models/supported-models
    * @returns {import('./provider-interface.js').ModelInfo[]}
    */
   getModels() {
+    // Return dynamically fetched models if available, else the hardcoded fallback
+    if (this._dynamicModels && this._dynamicModels.length > 0) {
+      return this._dynamicModels;
+    }
+    return this._getHardcodedModels();
+  }
+
+  /**
+   * Hardcoded fallback model list, kept in sync with GitHub Copilot docs.
+   * @returns {import('./provider-interface.js').ModelInfo[]}
+   * @private
+   */
+  _getHardcodedModels() {
     return [
-      // Claude models
-      { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', description: 'Anthropic Claude Sonnet via Copilot' },
-      { id: 'claude-sonnet-4-5-thinking', name: 'Claude Sonnet 4.5 Thinking', description: 'Claude reasoning via Copilot' },
-      { id: 'claude-opus-4-5-thinking', name: 'Claude Opus 4.5 Thinking', description: 'Claude Opus reasoning via Copilot' },
-      // Gemini models
+      // Claude models (Anthropic) — use dots, not dashes, in version numbers
+      { id: 'claude-opus-4.6', name: 'Claude Opus 4.6', description: 'Anthropic Claude Opus 4.6 via Copilot (supports adaptive thinking)' },
+      { id: 'claude-opus-4.6-fast', name: 'Claude Opus 4.6 Fast (Preview)', description: 'Anthropic Claude Opus 4.6 fast preview via Copilot' },
+      { id: 'claude-opus-4.5', name: 'Claude Opus 4.5', description: 'Anthropic Claude Opus 4.5 via Copilot' },
+      { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', description: 'Anthropic Claude Sonnet 4.5 via Copilot' },
+      { id: 'claude-sonnet-4', name: 'Claude Sonnet 4', description: 'Anthropic Claude Sonnet 4 via Copilot' },
+      { id: 'claude-haiku-4.5', name: 'Claude Haiku 4.5', description: 'Anthropic Claude Haiku 4.5 via Copilot (lightweight)' },
+      // Gemini models (Google)
       { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', description: 'Google Gemini 2.5 Pro via Copilot' },
-      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Google Gemini 2.5 Flash via Copilot' },
-      // GPT models
-      { id: 'gpt-4o', name: 'GPT-4o', description: 'OpenAI GPT-4o via Copilot' },
+      { id: 'gemini-3-pro', name: 'Gemini 3 Pro', description: 'Google Gemini 3 Pro via Copilot' },
+      { id: 'gemini-3-flash', name: 'Gemini 3 Flash', description: 'Google Gemini 3 Flash via Copilot (lightweight)' },
+      // GPT models (OpenAI)
+      { id: 'gpt-5.3-codex', name: 'GPT-5.3-Codex', description: 'OpenAI GPT-5.3-Codex via Copilot (latest)' },
+      { id: 'gpt-5.2-codex', name: 'GPT-5.2-Codex', description: 'OpenAI GPT-5.2-Codex via Copilot (powerful)' },
+      { id: 'gpt-5.2', name: 'GPT-5.2', description: 'OpenAI GPT-5.2 via Copilot' },
+      { id: 'gpt-5.1-codex-max', name: 'GPT-5.1-Codex-Max', description: 'OpenAI GPT-5.1-Codex-Max via Copilot (powerful)' },
+      { id: 'gpt-5.1-codex-mini', name: 'GPT-5.1-Codex-Mini', description: 'OpenAI GPT-5.1-Codex-Mini via Copilot' },
+      { id: 'gpt-5.1-codex', name: 'GPT-5.1-Codex', description: 'OpenAI GPT-5.1-Codex via Copilot' },
+      { id: 'gpt-5.1', name: 'GPT-5.1', description: 'OpenAI GPT-5.1 via Copilot' },
+      { id: 'gpt-5-codex', name: 'GPT-5-Codex', description: 'OpenAI GPT-5-Codex via Copilot' },
+      { id: 'gpt-5', name: 'GPT-5', description: 'OpenAI GPT-5 via Copilot' },
+      { id: 'gpt-5-mini', name: 'GPT-5 mini', description: 'OpenAI GPT-5 mini via Copilot (lightweight)' },
       { id: 'gpt-4.1', name: 'GPT-4.1', description: 'OpenAI GPT-4.1 via Copilot' },
-      { id: 'o3-pro', name: 'o3 Pro', description: 'OpenAI o3 Pro reasoning via Copilot' },
-      { id: 'o4-mini', name: 'o4 Mini', description: 'OpenAI o4 Mini via Copilot' }
+      // Other
+      { id: 'grok-code-fast-1', name: 'Grok Code Fast 1', description: 'xAI Grok Code Fast 1 via Copilot (lightweight)' },
+      { id: 'raptor-mini', name: 'Raptor Mini', description: 'Raptor Mini via Copilot' }
     ];
   }
 
+  /**
+   * Check whether a model ID is valid for this provider.
+   * Checks both hardcoded and dynamically fetched models.
+   *
+   * @param {string} modelId - Model identifier to validate
+   * @returns {boolean}
+   */
+  isValidModel(modelId) {
+    const allModels = this.getModels();
+    return allModels.some(m => m.id === modelId);
+  }
+
+  /**
+   * Fetch available models from the Copilot API dynamically.
+   * Falls back silently to the hardcoded list on failure.
+   *
+   * @param {string} [token] - OAuth token (uses stored config if not provided)
+   * @returns {Promise<import('./provider-interface.js').ModelInfo[]>}
+   */
+  async fetchModels(token) {
+    try {
+      const apiKey = token || (await getProviderConfig('copilot'))?.token || process.env.GITHUB_COPILOT_TOKEN;
+      if (!apiKey) return this._getHardcodedModels();
+
+      const resp = await fetch(`${COPILOT_API_BASE_URL}/models`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!resp.ok) {
+        // API may not support /models endpoint — fall back silently
+        return this._getHardcodedModels();
+      }
+
+      const data = await resp.json();
+      const models = (data.data || data.models || data || []);
+
+      if (!Array.isArray(models) || models.length === 0) {
+        return this._getHardcodedModels();
+      }
+
+      this._dynamicModels = models.map(m => ({
+        id: m.id || m.name,
+        name: m.id || m.name,
+        description: m.description || `${m.id} via Copilot`
+      }));
+
+      return this._dynamicModels;
+    } catch (e) {
+      // Network error or parsing error — fall back silently
+      return this._getHardcodedModels();
+    }
+  }
+
   getDefaultModel() {
-    return 'claude-sonnet-4-5';
+    return 'claude-sonnet-4.5';
   }
 
   /**
