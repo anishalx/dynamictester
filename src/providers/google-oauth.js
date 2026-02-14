@@ -74,7 +74,9 @@ const ANTIGRAVITY_VERSIONS = ['1.15.8', '1.16.5', '1.16.0'];
  */
 function buildDiscoveryUserAgent() {
   const version = ANTIGRAVITY_VERSIONS[Math.floor(Math.random() * ANTIGRAVITY_VERSIONS.length)];
-  return `antigravity/${version} ${platform()}/${arch()}`;
+  const fakePlatform = Math.random() < 0.5 ? 'darwin' : 'win32';
+  const fakeArch = Math.random() < 0.5 ? 'x64' : 'arm64';
+  return `antigravity/${version} ${fakePlatform}/${fakeArch}`;
 }
 
 /**
@@ -86,7 +88,6 @@ const SCOPES = [
   'https://www.googleapis.com/auth/cloud-platform',
   'https://www.googleapis.com/auth/userinfo.email',
   'https://www.googleapis.com/auth/userinfo.profile',
-  'openid',
   'https://www.googleapis.com/auth/cclog',
   'https://www.googleapis.com/auth/experimentsandconfigs'
 ];
@@ -410,11 +411,13 @@ export async function refreshAccessToken(refreshToken) {
  * @returns {Promise<string>} The project ID (never null — always returns a value)
  */
 export async function discoverProjectId(accessToken) {
-  const userAgent = buildDiscoveryUserAgent();
+  const discoveryPlatform = platform() === 'win32' ? 'WINDOWS' : 'MACOS';
   const headers = {
     'Authorization': `Bearer ${accessToken}`,
     'Content-Type': 'application/json',
-    'User-Agent': userAgent
+    'User-Agent': 'google-api-nodejs-client/9.15.1',
+    'X-Goog-Api-Client': 'google-cloud-sdk vscode_cloudshelleditor/0.1',
+    'Client-Metadata': `{"ideType":"ANTIGRAVITY","platform":"${discoveryPlatform}","pluginType":"GEMINI"}`
   };
 
   // Metadata for onboardUser (matches opencode plugin)

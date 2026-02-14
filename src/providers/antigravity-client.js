@@ -1,12 +1,13 @@
 import { randomBytes, randomUUID } from 'crypto';
-import { platform, arch } from 'os';
 
 /**
  * Antigravity endpoint URLs in fallback order.
+ * Matches the opencode plugin: daily → autopush → prod.
  * @type {string[]}
  */
 const ANTIGRAVITY_ENDPOINTS = [
   'https://daily-cloudcode-pa.sandbox.googleapis.com',
+  'https://autopush-cloudcode-pa.sandbox.googleapis.com',
   'https://cloudcode-pa.googleapis.com'
 ];
 
@@ -51,7 +52,7 @@ const API_CLIENT_VALUES = [
  * @type {Record<string, string>}
  */
 const PLATFORM_MAP = {
-  linux: 'LINUX',
+  linux: 'MACOS',
   darwin: 'MACOS',
   win32: 'WINDOWS'
 };
@@ -61,11 +62,12 @@ const PLATFORM_MAP = {
  * @returns {string}
  */
 function buildUserAgent() {
-  const version = ANTIGRAVITY_VERSIONS[Math.floor(Math.random() * ANTIGRAVITY_VERSIONS.length)];
-  const plat = platform();
-  const archStr = arch();
-  // Match the pattern: antigravity/1.16.5 linux/x64
-  return `antigravity/${version} ${plat}/${archStr}`;
+  const version = pickRandom(ANTIGRAVITY_VERSIONS);
+  // Antigravity is an Electron app — only runs on macOS/Windows.
+  // Never expose linux platform (matches reference fingerprint.js:48).
+  const fakePlatform = Math.random() < 0.5 ? 'darwin' : 'win32';
+  const fakeArch = pickRandom(['x64', 'arm64']);
+  return `antigravity/${version} ${fakePlatform}/${fakeArch}`;
 }
 
 /**
@@ -102,24 +104,38 @@ export class AntigravityClient {
   /**
    * @param {object} options
    * @param {string} options.accessToken - OAuth access token
-   * @param {string} [options.projectId] - Google Cloud project ID
-   * @param {string} [options.defaultModel] - Default model if not specified per-request
-   * @param {string} [options.sandboxUrl] - Override sandbox base URL
-   */
-  constructor(options = {}) {
-    this._accessToken = options.accessToken;
-    this._projectId = options.projectId || DEFAULT_PROJECT_ID;
-    this._defaultModel = options.defaultModel || 'gemini-2.5-flash';
-    this._sandboxUrl = options.sandboxUrl || DEFAULT_SANDBOX_URL;
-
-    // Generate a stable per-session fingerprint (matches opencode plugin behavior)
-    this._sessionFingerprint = {
-      deviceId: randomUUID(),
-      sessionToken: randomBytes(16).toString('hex'),
-      userAgent: buildUserAgent(),
-      apiClient: pickRandom(API_CLIENT_VALUES),
-      platform: PLATFORM_MAP[platform()] || 'LINUX'
-    };
+    * @param {string} [options.projectId] - Google Cloud project ID
+    * @param {string} [options.defaultModel] - Default model if not specified per-request
+    * @param {string} [options.sandboxUrl] - Override sandbox base URL
+    * @param {object} [options.fingerprint] - Persistent fingerprint (stored across sessions)
+    */
+   constructor(options = {}) {
+     this._accessToken = options.accessToken;
+     this._projectId = options.projectId || DEFAULT_PROJECT_ID;
+     this._defaultModel = options.defaultModel || 'gemini-2.5-flash';
+     this._sandboxUrl = options.sandboxUrl || DEFAULT_SANDBOX_URL;
+ 
+     // Use a persistent fingerprint if provided, otherwise generate per-session.
+     // The opencode plugin stores fingerprints across sessions — generating new
+     // random ones every launch looks suspicious and may trigger ToS flags.
+     if (options.fingerprint && options.fingerprint.sessionToken) {
+       this._sessionFingerprint = options.fingerprint;
+     } else {
+      const fpPlatform = Math.random() < 0.5 ? 'MACOS' : 'WINDOWS';
+      this._sessionFingerprint = {
+        deviceId: randomUUID(),
+        sessionToken: randomBytes(16).toString('hex'),
+        userAgent: buildUserAgent(),
+        apiClient: pickRandom(API_CLIENT_VALUES),
+        platform: fpPlatform,
+        clientMetadata: {
+          ideType: 'ANTIGRAVITY',
+          platform: fpPlatform,
+          pluginType: 'GEMINI'
+        },
+        createdAt: Date.now()
+      };
+     }
 
     // Mimic OpenAI SDK interface: client.chat.completions.create(...)
     this.chat = {
@@ -130,12 +146,42 @@ export class AntigravityClient {
   }
 
   /**
-   * Update the access token (e.g. after a refresh).
-   * @param {string} token
-   */
-  setAccessToken(token) {
-    this._accessToken = token;
-  }
+    * Update the access token (e.g. after a refresh).
+    * @param {string} token
+    */
+   setAccessToken(token) {
+     this._accessToken = token;
+   }
+ 
+   /**
+    * Get the session fingerprint (for persisting to config).
+    * @returns {object}
+    */
+   getFingerprint() {
+     return { ...this._sessionFingerprint };
+   }
+ 
+   /**
+    * Generate a new persistent fingerprint suitable for storage.
+    * Call this once during authentication and store in config.
+    * @returns {object}
+    */
+   static generateFingerprint() {
+      const fpPlatform = Math.random() < 0.5 ? 'MACOS' : 'WINDOWS';
+      return {
+        deviceId: randomUUID(),
+        sessionToken: randomBytes(16).toString('hex'),
+        userAgent: buildUserAgent(),
+        apiClient: pickRandom(API_CLIENT_VALUES),
+        platform: fpPlatform,
+        clientMetadata: {
+          ideType: 'ANTIGRAVITY',
+          platform: fpPlatform,
+          pluginType: 'GEMINI'
+        },
+        createdAt: Date.now()
+      };
+    }
 
   // ---------------------------------------------------------------------------
   // OpenAI → Gemini request translation
@@ -288,22 +334,60 @@ export class AntigravityClient {
    * @private
    */
   _convertTools(tools) {
-    if (!tools || tools.length === 0) return undefined;
-
-    const declarations = [];
-    for (const tool of tools) {
-      if (tool.type === 'function' && tool.function) {
-        declarations.push({
-          name: tool.function.name,
-          description: tool.function.description || '',
-          parameters: tool.function.parameters || {}
-        });
-      }
-    }
-
-    if (declarations.length === 0) return undefined;
-    return [{ functionDeclarations: declarations }];
-  }
+     if (!tools || tools.length === 0) return undefined;
+ 
+     const declarations = [];
+     for (const tool of tools) {
+       if (tool.type === 'function' && tool.function) {
+         const params = this._cleanSchema(tool.function.parameters || {});
+         declarations.push({
+           name: tool.function.name,
+           description: tool.function.description || '',
+           parameters: params
+         });
+       }
+     }
+ 
+     if (declarations.length === 0) return undefined;
+     return [{ functionDeclarations: declarations }];
+   }
+ 
+   /**
+    * Clean a JSON Schema for Gemini/Antigravity compatibility.
+    * Removes unsupported keywords ($ref, allOf, anyOf, oneOf, additionalProperties).
+    * Ensures empty schemas have at least one property (Gemini rejects empty).
+    *
+    * @param {object} schema
+    * @returns {object} Cleaned schema
+    * @private
+    */
+   _cleanSchema(schema) {
+     if (!schema || typeof schema !== 'object') return schema;
+ 
+     const cleaned = {};
+     const UNSUPPORTED_KEYS = ['$ref', 'allOf', 'anyOf', 'oneOf', 'not', 'additionalProperties', '$schema', '$id'];
+ 
+     for (const [key, value] of Object.entries(schema)) {
+       if (UNSUPPORTED_KEYS.includes(key)) continue;
+       if (key === 'properties' && typeof value === 'object') {
+         cleaned.properties = {};
+         for (const [propName, propSchema] of Object.entries(value)) {
+           cleaned.properties[propName] = this._cleanSchema(propSchema);
+         }
+       } else if (key === 'items' && typeof value === 'object') {
+         cleaned.items = this._cleanSchema(value);
+       } else {
+         cleaned[key] = value;
+       }
+     }
+ 
+     // Gemini rejects empty object schemas — add a placeholder
+     if (cleaned.type === 'object' && (!cleaned.properties || Object.keys(cleaned.properties).length === 0)) {
+       cleaned.properties = { _placeholder: { type: 'boolean', description: 'Unused placeholder' } };
+     }
+ 
+     return cleaned;
+   }
 
   // ---------------------------------------------------------------------------
   // Gemini → OpenAI response translation
@@ -441,19 +525,25 @@ export class AntigravityClient {
     }
 
     // Build the inner request (Gemini format)
-    const innerRequest = { contents };
-
-    if (systemInstruction) {
-      // Set role to 'user' for CLIProxyAPI compatibility (matches opencode plugin)
-      systemInstruction.role = 'user';
-      innerRequest.systemInstruction = systemInstruction;
-    }
-    if (Object.keys(generationConfig).length > 0) {
-      innerRequest.generationConfig = generationConfig;
-    }
-    if (geminiTools) {
-      innerRequest.tools = geminiTools;
-    }
+     const innerRequest = { contents };
+ 
+     if (systemInstruction) {
+       // Set role to 'user' for CLIProxyAPI compatibility (matches opencode plugin)
+       systemInstruction.role = 'user';
+       innerRequest.systemInstruction = systemInstruction;
+     }
+     if (Object.keys(generationConfig).length > 0) {
+       innerRequest.generationConfig = generationConfig;
+     }
+     if (geminiTools) {
+       innerRequest.tools = geminiTools;
+       // Matches the opencode plugin — VALIDATED mode for tool call response validation
+       innerRequest.toolConfig = {
+         functionCallingConfig: { mode: 'VALIDATED' }
+       };
+     }
+     // Session ID ties requests together (matches opencode plugin's signatureSessionKey)
+     innerRequest.sessionId = this._sessionFingerprint.sessionToken;
 
     // Build request body — Antigravity envelope format
     // Matches the opencode-antigravity-auth plugin's prepareAntigravityRequest()
@@ -467,57 +557,82 @@ export class AntigravityClient {
     };
 
     // Build headers matching the opencode plugin's antigravity mode.
-    // IMPORTANT: In antigravity mode, only User-Agent is sent as an HTTP header
-    // for content requests. X-Goog-Api-Client and Client-Metadata are NOT sent
-    // as HTTP headers. The x-goog-user-project header is stripped to prevent 403.
-    const url = `${this._sandboxUrl}/v1internal:generateContent`;
-    const headers = {
-      'Authorization': `Bearer ${this._accessToken}`,
-      'Content-Type': 'application/json',
-      'User-Agent': this._sessionFingerprint.userAgent
-    };
+     // IMPORTANT: In antigravity mode, only User-Agent is sent as an HTTP header
+     // for content requests. X-Goog-Api-Client and Client-Metadata are NOT sent
+     // as HTTP headers. The x-goog-user-project header is stripped to prevent 403.
+     const headers = {
+        'Authorization': `Bearer ${this._accessToken}`,
+        'Content-Type': 'application/json',
+        'User-Agent': this._sessionFingerprint.userAgent
+      };
 
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(requestBody)
-    });
-
-    if (!resp.ok) {
-      const errorText = await resp.text();
-      const error = this._buildApiError(resp.status, errorText, model);
-
-      // Attach headers so parseRetryAfter() in error-handling.js can use them
-      const retryAfter = resp.headers.get('retry-after');
-      if (retryAfter) {
-        error.headers = { 'retry-after': retryAfter };
+      // Add interleaved thinking header for Claude thinking models
+      // (matches reference plugin request.js:1067-1079)
+      if (model.includes('thinking')) {
+        headers['anthropic-beta'] = 'interleaved-thinking-2025-05-14';
       }
 
-      // For 429: extract retry delay from Antigravity response body
-      if (resp.status === 429) {
-        try {
-          const errorData = JSON.parse(errorText);
-          const retryInfo = errorData.error?.details?.find(
-            d => d['@type']?.includes('RetryInfo')
-          );
-          if (retryInfo?.retryDelay) {
-            const seconds = parseFloat(retryInfo.retryDelay);
-            if (!isNaN(seconds)) {
-              error.headers = { ...error.headers, 'retry-after': String(seconds) };
-            }
-          }
-        } catch (e) { /* Not JSON or no retry info */ }
-      }
-
-      throw error;
-    }
-
-    const geminiResponse = await resp.json();
-
-    // Antigravity wraps responses: { response: { candidates: [...] }, traceId: ... }
-    const actualResponse = geminiResponse.response || geminiResponse;
-    return this._convertResponse(actualResponse, model);
-  }
+      // Try endpoints in fallback order (daily → autopush → prod).
+     // On 403/5xx, try the next endpoint before giving up.
+     const endpointsToTry = [this._sandboxUrl, ...ANTIGRAVITY_ENDPOINTS.filter(e => e !== this._sandboxUrl)];
+     let lastError = null;
+ 
+     for (const endpoint of endpointsToTry) {
+       const url = `${endpoint}/v1internal:generateContent`;
+ 
+       const resp = await fetch(url, {
+         method: 'POST',
+         headers,
+         body: JSON.stringify(requestBody)
+       });
+ 
+       if (resp.ok) {
+         const geminiResponse = await resp.json();
+         // Antigravity wraps responses: { response: { candidates: [...] }, traceId: ... }
+         const actualResponse = geminiResponse.response || geminiResponse;
+         return this._convertResponse(actualResponse, model);
+       }
+ 
+       const errorText = await resp.text();
+       lastError = this._buildApiError(resp.status, errorText, model);
+ 
+       // Attach headers so parseRetryAfter() in error-handling.js can use them
+       const retryAfter = resp.headers.get('retry-after');
+       if (retryAfter) {
+         lastError.headers = { 'retry-after': retryAfter };
+       }
+ 
+       // For 429: extract retry delay from Antigravity response body
+       if (resp.status === 429) {
+         try {
+           const errorData = JSON.parse(errorText);
+           const retryInfo = errorData.error?.details?.find(
+             d => d['@type']?.includes('RetryInfo')
+           );
+           if (retryInfo?.retryDelay) {
+             const seconds = parseFloat(retryInfo.retryDelay);
+             if (!isNaN(seconds)) {
+               lastError.headers = { ...lastError.headers, 'retry-after': String(seconds) };
+             }
+           }
+         } catch (e) { /* Not JSON or no retry info */ }
+       }
+ 
+       // On 403 ToS or 5xx, try the next endpoint before giving up
+       const is5xx = resp.status >= 500 && resp.status < 600;
+       const isToS403 = resp.status === 403 && /terms of service|disabled/i.test(errorText);
+       if ((is5xx || isToS403) && endpoint !== endpointsToTry[endpointsToTry.length - 1]) {
+         console.warn(`   Antigravity ${resp.status} on ${new URL(url).hostname}, trying next endpoint...`);
+         continue;
+       }
+ 
+       // Non-retriable error or last endpoint — throw immediately
+       throw lastError;
+     }
+ 
+     // All endpoints failed
+     throw lastError;
+   }
 
   /**
    * Build a descriptive Error from an API error response.
