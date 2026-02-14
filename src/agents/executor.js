@@ -13,6 +13,8 @@ import { PayloadGenerator } from '../testing/payload-generator.js';
 import { BypassEngine } from '../testing/bypass-engine.js';
 import { ResponseAnalyzer } from '../testing/response-analyzer.js';
 import { IntelligenceAggregator } from '../testing/intelligence-aggregator.js';
+import { VulnerabilityClassifier } from '../testing/classifier.js';
+import { formatLevel } from '../testing/exploitation-levels.js';
 
 // Maximum characters for tool results to avoid token limits
 const MAX_TOOL_RESULT_LENGTH = 8000;
@@ -262,6 +264,15 @@ COMPLETION:
       // Check for input validation errors (often false positive)
       analysis.isValidationError = ResponseAnalyzer.isValidationError(response);
 
+      // SSRF indicators (metadata, internal IPs)
+      analysis.ssrfIndicators = ResponseAnalyzer.detectSSRFIndicators(response);
+
+      // XXE indicators (file content disclosure)
+      analysis.xxeIndicators = ResponseAnalyzer.detectXXEIndicators(response);
+
+      // XSS reflection detection
+      analysis.xssReflection = ResponseAnalyzer.detectXSSReflection(response);
+
       // Boolean comparison (if both true/false responses provided)
       if (trueResponseBody !== undefined && falseResponseBody !== undefined) {
         analysis.booleanComparison = ResponseAnalyzer.compareBooleanResponses(
@@ -360,6 +371,18 @@ COMPLETION:
       parts.push('INPUT VALIDATION: Response suggests input validation rejected the payload (this is NOT a vulnerability indicator — it means the app has proper validation).');
     }
 
+    if (analysis.ssrfIndicators?.detected) {
+      parts.push(`SSRF DETECTED (${analysis.ssrfIndicators.source}): Server-side request returned internal/metadata content. Confidence: ${analysis.ssrfIndicators.confidence}.`);
+    }
+
+    if (analysis.xxeIndicators?.detected) {
+      parts.push(`XXE DETECTED: Response contains file content or XML entity reflection. Confidence: ${analysis.xxeIndicators.confidence}.`);
+    }
+
+    if (analysis.xssReflection?.detected) {
+      parts.push(`XSS REFLECTION DETECTED (${analysis.xssReflection.type}): Payload appears unescaped in response. Confidence: ${analysis.xssReflection.confidence}.`);
+    }
+
     if (analysis.booleanComparison) {
       const bc = analysis.booleanComparison;
       if (bc.different) {
@@ -386,6 +409,7 @@ COMPLETION:
   }
 
   // Enhanced evidence collection tool with developer-friendly output
+  // Integrates the 4-level VulnerabilityClassifier for accurate status assignment
   async function save_evidence(params) {
     const {
       id, type, evidence, payload, success,
@@ -393,7 +417,12 @@ COMPLETION:
       sourceFile, sourceLine, sourceColumn, cwe, owasp,
       endpoint, method, response, exploitationProof, remediation,
       // Additional context
-      xssType, injectionContext, secretType, vulnerabilityType
+      xssType, injectionContext, secretType, vulnerabilityType,
+      // Classification evidence fields (optional — classifier infers from them)
+      dataExtracted, criticalImpact, adminAccess, commandExecution,
+      queryManipulated, unionSuccess, booleanConfirmed,
+      injectionConfirmed, errorDetected, timingConfirmed,
+      externalBlocker, blockerReason, securityBlocker, securityReason
     } = params;
     
     const evidenceDir = path.join(outputDir, 'evidence');
@@ -401,6 +430,47 @@ COMPLETION:
     
     const fileName = `evidence-${id || 'unknown'}-${Date.now()}.json`;
     const filePath = path.join(evidenceDir, fileName);
+
+    // ---------------------------------------------------------------
+    // Build evidence object for the classifier
+    // ---------------------------------------------------------------
+    const classifierEvidence = {
+      dataExtracted: dataExtracted || null,
+      criticalImpact: criticalImpact || false,
+      adminAccess: adminAccess || false,
+      commandExecution: commandExecution || false,
+      queryManipulated: queryManipulated || false,
+      unionSuccess: unionSuccess || false,
+      booleanConfirmed: booleanConfirmed || false,
+      injectionConfirmed: injectionConfirmed || false,
+      errorDetected: errorDetected || false,
+      timingConfirmed: timingConfirmed || false
+    };
+
+    // Infer evidence flags from boolean success + exploitationProof
+    if (success && exploitationProof && !classifierEvidence.injectionConfirmed) {
+      classifierEvidence.injectionConfirmed = true;
+    }
+    if (success && dataExtracted && dataExtracted.length > 0) {
+      // Already set above
+    } else if (success && exploitationProof && /extracted|dumped|retrieved|obtained/i.test(exploitationProof)) {
+      classifierEvidence.dataExtracted = [exploitationProof];
+    }
+
+    const testResult = {
+      evidence: classifierEvidence,
+      externalBlocker: externalBlocker || null,
+      blockerReason: blockerReason || null,
+      securityBlocker: securityBlocker || null,
+      securityReason: securityReason || null,
+      blockerDescription: blockerReason || securityReason || '',
+      error: ''
+    };
+
+    // ---------------------------------------------------------------
+    // Run the classifier
+    // ---------------------------------------------------------------
+    const classification = VulnerabilityClassifier.classify(testResult);
     
     // Create developer-friendly structured output
     const evidenceData = {
@@ -438,12 +508,26 @@ COMPLETION:
       // Remediation guidance
       remediation: remediation || null,
       
-      // Status classification
-      status: success ? 'CONFIRMED' : 'TESTED_NOT_EXPLOITABLE'
+      // 4-level classification (replaces binary status)
+      classification: classification.classification,
+      status: classification.classification,
+      level: classification.level,
+      levelName: classification.levelName,
+      confidence: classification.confidence,
+      classificationReason: classification.reason,
+      includeInReport: classification.includeInReport,
+      requiresAction: classification.requiresAction,
+      ciExitCode: classification.ciExitCode
     };
     
     await fs.writeJSON(filePath, evidenceData, { spaces: 2 });
+
+    const levelStr = formatLevel(classification.level);
+    const statusIcon = classification.classification === 'CONFIRMED' ? '🔴' :
+                       classification.classification === 'LIKELY' ? '🟡' :
+                       classification.classification === 'BLOCKED' ? '🟠' : '🟢';
     console.log(chalk.green(`   📝 Evidence saved: ${fileName}`));
+    console.log(chalk.gray(`      ${statusIcon} ${classification.classification} — ${levelStr}`));
     
     // Also append to summary file for easy developer review
     const summaryPath = path.join(outputDir, 'findings_summary.json');
@@ -454,17 +538,21 @@ COMPLETION:
     
     summary.push({
       id: id,
-      status: evidenceData.status,
+      classification: classification.classification,
+      status: classification.classification,
+      level: classification.level,
+      confidence: classification.confidence,
       file: sourceFile,
       line: sourceLine,
       type: vulnerabilityType || type,
       cwe: cwe,
       endpoint: endpoint,
-      success: success
+      success: success,
+      requiresAction: classification.requiresAction
     });
     await fs.writeJSON(summaryPath, summary, { spaces: 2 });
     
-    return { status: 'success', path: filePath };
+    return { status: 'success', path: filePath, classification: classification.classification, level: classification.level };
   }
 
   // Read queue file tool - returns ALL vulnerabilities (no limit)
@@ -521,7 +609,16 @@ COMPLETION:
             vulnerabilityType: { type: 'string', description: 'Specific vulnerability type' },
             xssType: { type: 'string', description: 'For XSS: DOM, Reflected, or Stored' },
             injectionContext: { type: 'string', description: 'Injection context (HTML, Attribute, etc.)' },
-            secretType: { type: 'string', description: 'For secrets: APIKey, Password, Token, etc.' }
+            secretType: { type: 'string', description: 'For secrets: APIKey, Password, Token, etc.' },
+            // Classification evidence fields (for 4-level classification)
+            dataExtracted: { type: 'array', items: { type: 'string' }, description: 'Data extracted from target (e.g., db version, table names, user records). Presence = Level 3+ CONFIRMED.' },
+            criticalImpact: { type: 'boolean', description: 'True if admin creds obtained, sensitive data dumped, or system commands executed (Level 4).' },
+            errorDetected: { type: 'boolean', description: 'True if database/server error messages were triggered by payload (Level 1).' },
+            timingConfirmed: { type: 'boolean', description: 'True if time-based blind injection was confirmed via delay (Level 1).' },
+            booleanConfirmed: { type: 'boolean', description: 'True if boolean-based blind injection was confirmed (Level 2).' },
+            queryManipulated: { type: 'boolean', description: 'True if UNION SELECT or ORDER BY manipulation succeeded (Level 2).' },
+            externalBlocker: { type: 'string', description: 'If testing was blocked by external factor (auth required, server down, rate limit). Sets BLOCKED status.' },
+            securityBlocker: { type: 'string', description: 'If security controls prevented exploitation (WAF, prepared statements, input validation). Sets NOT_REPRODUCIBLE status.' }
           },
           required: ['id', 'payload', 'success', 'sourceFile', 'sourceLine']
         }
@@ -642,12 +739,13 @@ COMPLETION:
   ];
 
   let turnCount = 0;
-  const maxTurns = 50; // Increased from 30 to allow thorough testing
+  const maxTurns = 75; // Increased to allow thorough testing of large queues
   let consecutiveErrors = 0;
   const maxConsecutiveErrors = 5;
   let consecutiveNudges = 0;
   const maxNudges = 3; // Max times to nudge model before accepting it's done
   let evidenceSavedCount = 0; // Track how many vulnerabilities have been tested
+  let lastEvidenceTurn = 0; // Track when last evidence was saved (stall detection)
 
   try {
     while (turnCount < maxTurns) {
@@ -782,6 +880,7 @@ COMPLETION:
               // Track evidence saves for completion detection
               if (toolName === 'save_evidence') {
                 evidenceSavedCount++;
+                lastEvidenceTurn = turnCount;
                 console.log(chalk.cyan(`      📊 Evidence saved: ${evidenceSavedCount}/${totalVulnerabilities}`));
               }
 
@@ -854,6 +953,21 @@ COMPLETION:
       if (response.choices[0].finish_reason === 'stop' && evidenceSavedCount > 0) {
         console.log(chalk.green(`\n   ✅ Agent finished (${evidenceSavedCount}/${totalVulnerabilities} vulnerabilities tested)`));
         break;
+      }
+
+      // Stall detection: if we've saved some evidence but haven't saved any in
+      // the last 15 turns, the agent is likely stuck. Nudge it once, then stop.
+      if (evidenceSavedCount > 0 && (turnCount - lastEvidenceTurn) > 15) {
+        if (evidenceSavedCount >= totalVulnerabilities) {
+          console.log(chalk.green(`\n   ✅ All ${totalVulnerabilities} vulnerabilities tested`));
+          break;
+        }
+        console.log(chalk.yellow(`\n   ⚠️ Agent has not saved evidence for 15 turns. Remaining: ${totalVulnerabilities - evidenceSavedCount}`));
+        messages.push({
+          role: 'user',
+          content: `You have tested ${evidenceSavedCount}/${totalVulnerabilities} vulnerabilities but have not saved any evidence for the last 15 turns. Please continue testing the remaining vulnerabilities and call save_evidence for each one. If you are unable to test them, call save_evidence with success=false and explain why in the evidence field.`
+        });
+        lastEvidenceTurn = turnCount; // Reset stall timer
       }
     }
 

@@ -2,14 +2,86 @@ import { fs, path } from 'zx';
 import chalk from 'chalk';
 
 /**
- * Generate exploitation queue from normalized vulnerabilities
- * Supports vulnerabilities from multiple analyzers (Semgrep, Gitleaks, Trivy, etc.)
+ * Severity weight map for priority scoring
+ * @type {Readonly<Record<string, number>>}
+ */
+const SEVERITY_WEIGHT = Object.freeze({
+  CRITICAL: 10,
+  HIGH: 7,
+  MEDIUM: 4,
+  LOW: 2,
+  INFO: 0
+});
+
+/**
+ * Confidence weight map for priority scoring
+ * @type {Readonly<Record<string, number>>}
+ */
+const CONFIDENCE_WEIGHT = Object.freeze({
+  HIGH: 3,
+  MEDIUM: 2,
+  LOW: 1
+});
+
+/**
+ * Type-based exploitability bonus — higher for types that are typically
+ * more likely to be genuinely exploitable when flagged by static analysis.
+ * @type {Readonly<Record<string, number>>}
+ */
+const EXPLOITABILITY_BONUS = Object.freeze({
+  injection: 5,
+  xss: 4,
+  ssrf: 4,
+  xxe: 4,
+  traversal: 4,
+  deserialization: 4,
+  upload: 3,
+  redirect: 3,
+  auth: 3,
+  access: 3,
+  csrf: 2,
+  secrets: 2,
+  crypto: 1,
+  config: 1,
+  dependency: 1,
+  other: 0
+});
+
+/**
+ * Calculate a numeric priority score for a vulnerability.
+ * Higher score = test sooner.
+ *
+ * @param {object} vuln - Normalized vulnerability
+ * @returns {number} Priority score (0-18)
+ */
+function calculatePriority(vuln) {
+  const sevScore = SEVERITY_WEIGHT[vuln.severity] || SEVERITY_WEIGHT.MEDIUM;
+  const confScore = CONFIDENCE_WEIGHT[vuln.confidence] || CONFIDENCE_WEIGHT.MEDIUM;
+  const exploitBonus = EXPLOITABILITY_BONUS[vuln.type] || 0;
+  return sevScore + confScore + exploitBonus;
+}
+
+/**
+ * Generate exploitation queue from normalized vulnerabilities.
+ * Groups by type, assigns priority scores, and sorts highest-priority first.
+ * Supports all recognized vulnerability categories.
+ *
+ * @param {Array} vulnerabilities - Normalized vulnerability array
+ * @param {string} outputDir - Directory for queue JSON files
+ * @returns {Promise<Record<string, Array>>} Created queues keyed by type
  */
 export async function generateExploitationQueue(vulnerabilities, outputDir) {
   const queues = {
     injection: [],
     xss: [],
     ssrf: [],
+    xxe: [],
+    traversal: [],
+    redirect: [],
+    csrf: [],
+    deserialization: [],
+    upload: [],
+    access: [],
     auth: [],
     secrets: [],
     crypto: [],
@@ -27,13 +99,17 @@ export async function generateExploitationQueue(vulnerabilities, outputDir) {
     }
     
     const loc = vuln.location || {};
+    const priority = calculatePriority(vuln);
+
     queues[queueType].push({
       id: vuln.id,
       source: vuln.source, // Track which analyzer found it
       sourceVersion: vuln.sourceVersion,
       checkId: vuln.checkId,
       verdict: 'vulnerable',
+      severity: vuln.severity || 'MEDIUM',
       confidence: vuln.confidence,
+      priority,
       vulnerabilityType: vuln.subType || queueType,
       location: `${loc.file || 'unknown'}:${loc.line || 0}`,
       file: loc.file || 'unknown',
@@ -60,6 +136,9 @@ export async function generateExploitationQueue(vulnerabilities, outputDir) {
   
   for (const [type, queue] of Object.entries(queues)) {
     if (queue.length > 0) {
+      // Sort by priority descending — highest priority tested first
+      queue.sort((a, b) => b.priority - a.priority);
+
       const queuePath = path.join(deliverablesDir, `${type}_exploitation_queue.json`);
       await fs.writeJSON(queuePath, { vulnerabilities: queue }, { spaces: 2 });
       
@@ -88,11 +167,11 @@ function generateWitnessPayload(vuln) {
   const subType = vuln.subType || '';
   const type = vuln.type || '';
   
-  // Injection payloads
-  if (subType === 'SQLi' || type === 'injection' && vuln.description?.toLowerCase().includes('sql')) {
+  // Injection payloads — parentheses fix operator precedence
+  if (subType === 'SQLi' || (type === 'injection' && vuln.description?.toLowerCase().includes('sql'))) {
     return "' OR '1'='1' --";
   }
-  if (subType === 'CommandInjection' || vuln.description?.toLowerCase().includes('command')) {
+  if (subType === 'CommandInjection' || (type === 'injection' && vuln.description?.toLowerCase().includes('command'))) {
     return "; whoami";
   }
   if (subType === 'CodeInjection' || subType === 'EvalInjection') {
@@ -100,6 +179,15 @@ function generateWitnessPayload(vuln) {
   }
   if (subType === 'SSTI') {
     return "{{7*7}}";
+  }
+  if (subType === 'LDAPInjection') {
+    return "*)(&";
+  }
+  if (subType === 'XPathInjection') {
+    return "' or '1'='1";
+  }
+  if (subType === 'NoSQLi') {
+    return '{"$gt":""}';
   }
   
   // XSS payloads
@@ -110,6 +198,41 @@ function generateWitnessPayload(vuln) {
   // SSRF payloads
   if (type === 'ssrf') {
     return "http://169.254.169.254/latest/meta-data/";
+  }
+
+  // XXE payloads
+  if (type === 'xxe') {
+    return '<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&xxe;</foo>';
+  }
+
+  // Path Traversal payloads
+  if (type === 'traversal') {
+    return "../../../../etc/passwd";
+  }
+
+  // Open Redirect payloads
+  if (type === 'redirect') {
+    return "//evil.com";
+  }
+
+  // CSRF payloads
+  if (type === 'csrf') {
+    return "csrf_token_bypass_test";
+  }
+
+  // Deserialization payloads
+  if (type === 'deserialization') {
+    return '{"__proto__":{"isAdmin":true}}';
+  }
+
+  // File Upload payloads
+  if (type === 'upload') {
+    return "shell.php%00.jpg";
+  }
+
+  // IDOR / Access Control payloads
+  if (type === 'access') {
+    return "user_id=1";
   }
   
   // Default payload

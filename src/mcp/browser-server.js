@@ -622,7 +622,10 @@ export class BrowserManager {
       }
 
       // Use Node.js native fetch — no CORS restrictions, no page navigation required
+      const startTime = Date.now();
       const response = await fetch(url, fetchOptions);
+      const endTime = Date.now();
+      const responseTimeMs = endTime - startTime;
       const text = await response.text();
 
       let json = null;
@@ -640,7 +643,9 @@ export class BrowserManager {
         body: text.slice(0, 5000),
         json,
         responseSuccess: response.ok,
-        authInjected: useAuth && this.authManager.hasAuth()
+        authInjected: useAuth && this.authManager.hasAuth(),
+        responseTimeMs,
+        responseTimeSec: (responseTimeMs / 1000).toFixed(3)
       };
     } catch (e) {
       return { status: 'error', message: e.message, url };

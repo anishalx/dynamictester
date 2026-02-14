@@ -11,6 +11,7 @@ import { executeExploitationAgent } from './agents/executor.js';
 import { path, fs } from 'zx';
 import { getSupportedAnalyzers } from './parser/parser-factory.js';
 import { generateSarifReport, generateHtmlReport, generateDeveloperSummary } from './reporting/report-generator.js';
+import { CIReporter, runCIMode } from './reporting/ci-reporter.js';
 import {
   getProvider,
   getAllProviders,
@@ -35,6 +36,11 @@ const subcommand = args[0];
 // Parse --provider and --model CLI flags (e.g. --provider=copilot --model=gpt-4o)
 const cliProvider = args.find(a => a.startsWith('--provider='))?.split('=')[1];
 const cliModel = args.find(a => a.startsWith('--model='))?.split('=')[1];
+
+// Parse CI mode flags
+const isCIMode = args.includes('--ci');
+const ciFailOnLikely = args.includes('--fail-on-likely');
+const ciFailOnBlocked = args.includes('--fail-on-blocked');
 
 if (subcommand === 'auth') {
   const action = args[1]; // login | status | logout
@@ -281,13 +287,18 @@ async function main() {
       injection: 'exploit-injection.txt',
       xss: 'exploit-xss.txt',
       ssrf: 'exploit-ssrf.txt',
+      xxe: 'exploit-xxe.txt',
+      traversal: 'exploit-traversal.txt',
+      redirect: 'exploit-redirect.txt',
       secrets: 'exploit-secrets.txt',
       auth: 'exploit-auth.txt',
-      traversal: 'exploit-traversal.txt',
-      xxe: 'exploit-xxe.txt',
-      redirect: 'exploit-redirect.txt',
-      dependency: 'exploit-generic.txt',
+      csrf: 'exploit-generic.txt',
+      deserialization: 'exploit-generic.txt',
+      upload: 'exploit-generic.txt',
+      access: 'exploit-generic.txt',
+      crypto: 'exploit-generic.txt',
       config: 'exploit-generic.txt',
+      dependency: 'exploit-generic.txt',
       other: 'exploit-generic.txt'
     };
 
@@ -365,15 +376,34 @@ async function main() {
     } catch (reportError) {
       console.log(chalk.yellow(`⚠️ HTML report warning: ${reportError.message}`));
     }
+
+    // CI mode: generate CI report and exit with appropriate code
+    if (isCIMode) {
+      console.log(chalk.blue('\n📋 Generating CI report...'));
+      try {
+        const exitCode = await runCIMode({
+          evidenceDir,
+          outputDir,
+          failOnLikely: ciFailOnLikely,
+          failOnBlocked: ciFailOnBlocked
+        });
+        console.log(chalk.gray(`\nResults saved to: ${outputDir}`));
+        process.exit(exitCode);
+      } catch (ciError) {
+        console.error(chalk.red(`CI report error: ${ciError.message}`));
+        process.exit(2);
+      }
+    }
     
     console.log(chalk.green.bold('\n🎉 Dynamic testing session complete!'));
     console.log(chalk.gray(`Results saved to: ${outputDir}`));
     console.log(chalk.gray(`\nOutput files:`));
-    console.log(chalk.gray(`  • evidence/           - Individual finding details`));
-    console.log(chalk.gray(`  • findings_summary.json - Quick summary for developers`));
+    console.log(chalk.gray(`  • evidence/              - Individual finding details`));
+    console.log(chalk.gray(`  • findings_summary.json  - Quick summary for developers`));
     console.log(chalk.gray(`  • developer_summary.json - Categorized findings`));
-    console.log(chalk.gray(`  • report.sarif.json   - SARIF for IDE integration`));
-    console.log(chalk.gray(`  • report.html         - Visual HTML report`));
+    console.log(chalk.gray(`  • report.sarif.json      - SARIF for IDE integration`));
+    console.log(chalk.gray(`  • report.html            - Visual HTML report`));
+    console.log(chalk.gray(`\nTip: Use --ci flag for CI/CD integration with exit codes`));
     
   } catch (error) {
     console.error(chalk.red(`\n❌ Error: ${error.message}`));

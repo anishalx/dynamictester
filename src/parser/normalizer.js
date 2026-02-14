@@ -1,3 +1,5 @@
+import { createHash } from 'crypto';
+
 /**
  * Data normalization utilities to ensure consistent field values across analyzers
  */
@@ -31,9 +33,12 @@ export function normalizeConfidence(confidence) {
 }
 
 /**
- * Map vulnerability to internal type categories
+ * Map vulnerability to internal type categories.
+ * Comprehensive pattern matching for 18+ vulnerability classes with
+ * CWE-based detection and keyword analysis across multiple indicators.
+ *
  * @param {object} vuln - Vulnerability object with description, checkId, cwe, etc.
- * @returns {{type: string, subType: string}}
+ * @returns {{type: string, subType: string, owasp: string[]}}
  */
 export function categorizeVulnerability(vuln) {
   const cweArr = Array.isArray(vuln.cwe) ? vuln.cwe : (vuln.cwe ? [vuln.cwe] : []);
@@ -41,25 +46,37 @@ export function categorizeVulnerability(vuln) {
     vuln.description?.toLowerCase() || '',
     vuln.checkId?.toLowerCase() || '',
     cweArr.join(' ').toLowerCase(),
-    vuln.metadata?.vulnerability_class?.join(' ')?.toLowerCase() || ''
+    vuln.metadata?.vulnerability_class?.join(' ')?.toLowerCase() || '',
+    vuln.title?.toLowerCase() || '',
+    vuln.message?.toLowerCase() || ''
   ].join(' ');
 
-  // Secrets detection
-  if (/secret|password|api[_-]?key|token|credential|private[_-]?key/.test(indicators)) {
+  // -------------------------------------------------------------------
+  // Secrets / Hardcoded credentials (check first — very distinct)
+  // -------------------------------------------------------------------
+  if (/secret|password|api[_-]?key|token|credential|private[_-]?key|cwe-798|cwe-259|cwe-321/.test(indicators)) {
+    if (/password/.test(indicators)) return { type: 'secrets', subType: 'HardcodedPassword', owasp: ['A02:2021'] };
+    if (/api[_-]?key/.test(indicators)) return { type: 'secrets', subType: 'ExposedAPIKey', owasp: ['A02:2021'] };
+    if (/private[_-]?key/.test(indicators)) return { type: 'secrets', subType: 'ExposedPrivateKey', owasp: ['A02:2021'] };
     return { type: 'secrets', subType: 'HardcodedSecret', owasp: ['A02:2021'] };
   }
 
-  // Injection vulnerabilities
+  // -------------------------------------------------------------------
+  // Injection vulnerabilities (NoSQL first — "nosql" contains "sql")
+  // -------------------------------------------------------------------
+  if (/nosql.*injection|mongodb.*injection|cwe-943/.test(indicators)) {
+    return { type: 'injection', subType: 'NoSQLi', owasp: ['A03:2021'] };
+  }
   if (/sql.*injection|cwe-89/.test(indicators)) {
     return { type: 'injection', subType: 'SQLi', owasp: ['A03:2021'] };
   }
-  if (/command.*injection|cwe-78|cwe-77/.test(indicators)) {
+  if (/command.*injection|os.*command|cwe-78|cwe-77/.test(indicators)) {
     return { type: 'injection', subType: 'CommandInjection', owasp: ['A03:2021'] };
   }
-  if (/code.*injection|cwe-94|cwe-95|eval/.test(indicators)) {
+  if (/code.*injection|cwe-94|cwe-95|eval\s*\(|new\s+function/.test(indicators)) {
     return { type: 'injection', subType: 'CodeInjection', owasp: ['A03:2021'] };
   }
-  if (/template.*injection|ssti/.test(indicators)) {
+  if (/template.*injection|ssti|cwe-1336/.test(indicators)) {
     return { type: 'injection', subType: 'SSTI', owasp: ['A03:2021'] };
   }
   if (/ldap.*injection|cwe-90/.test(indicators)) {
@@ -68,79 +85,151 @@ export function categorizeVulnerability(vuln) {
   if (/xpath.*injection|cwe-643/.test(indicators)) {
     return { type: 'injection', subType: 'XPathInjection', owasp: ['A03:2021'] };
   }
+  if (/header.*injection|http.*response.*split|crlf|cwe-113|cwe-644/.test(indicators)) {
+    return { type: 'injection', subType: 'HeaderInjection', owasp: ['A03:2021'] };
+  }
+  if (/expression.*language|el.*injection|ognl|spel|cwe-917/.test(indicators)) {
+    return { type: 'injection', subType: 'ELInjection', owasp: ['A03:2021'] };
+  }
 
-  // XSS
+  // -------------------------------------------------------------------
+  // XSS — Reflected, Stored, DOM
+  // -------------------------------------------------------------------
   if (/xss|cross.*site.*script|cwe-79/.test(indicators)) {
-    if (/stored/.test(indicators)) return { type: 'xss', subType: 'StoredXSS', owasp: ['A03:2021'] };
+    if (/stored|persistent/.test(indicators)) return { type: 'xss', subType: 'StoredXSS', owasp: ['A03:2021'] };
     if (/dom/.test(indicators)) return { type: 'xss', subType: 'DOMXSS', owasp: ['A03:2021'] };
     return { type: 'xss', subType: 'ReflectedXSS', owasp: ['A03:2021'] };
   }
 
+  // -------------------------------------------------------------------
   // XXE
+  // -------------------------------------------------------------------
   if (/xxe|xml.*external.*entity|cwe-611/.test(indicators)) {
     return { type: 'xxe', subType: 'XXE', owasp: ['A05:2021'] };
   }
 
+  // -------------------------------------------------------------------
   // SSRF
+  // -------------------------------------------------------------------
   if (/ssrf|server.*side.*request|cwe-918/.test(indicators)) {
     return { type: 'ssrf', subType: 'SSRF', owasp: ['A10:2021'] };
   }
 
+  // -------------------------------------------------------------------
   // CSRF
+  // -------------------------------------------------------------------
   if (/csrf|cross.*site.*request.*forgery|cwe-352/.test(indicators)) {
     return { type: 'csrf', subType: 'CSRF', owasp: ['A01:2021'] };
   }
 
+  // -------------------------------------------------------------------
   // Deserialization
-  if (/deserialization|deserialize|cwe-502/.test(indicators)) {
+  // -------------------------------------------------------------------
+  if (/deserialization|deserialize|cwe-502|prototype.*pollut|cwe-1321/.test(indicators)) {
+    if (/prototype.*pollut|cwe-1321/.test(indicators)) {
+      return { type: 'deserialization', subType: 'PrototypePollution', owasp: ['A08:2021'] };
+    }
     return { type: 'deserialization', subType: 'InsecureDeserialization', owasp: ['A08:2021'] };
   }
 
+  // -------------------------------------------------------------------
   // Open Redirect
-  if (/open.*redirect|unvalidated.*redirect|cwe-601/.test(indicators)) {
+  // -------------------------------------------------------------------
+  if (/open.*redirect|unvalidated.*redirect|url.*redirect|cwe-601/.test(indicators)) {
     return { type: 'redirect', subType: 'OpenRedirect', owasp: ['A01:2021'] };
   }
 
-  // Authentication
-  if (/auth(?!z)|cwe-287|cwe-306/.test(indicators)) {
-    return { type: 'auth', subType: 'Authentication', owasp: ['A07:2021'] };
-  }
-
-  // Cryptography
-  if (/crypto|encrypt|hash|cwe-327|cwe-326|weak.*algorithm/.test(indicators)) {
-    return { type: 'crypto', subType: 'WeakCrypto', owasp: ['A02:2021'] };
-  }
-
-  // Path Traversal
-  if (/path.*traversal|directory.*traversal|cwe-22/.test(indicators)) {
+  // -------------------------------------------------------------------
+  // Path Traversal / Local File Inclusion
+  // -------------------------------------------------------------------
+  if (/path.*traversal|directory.*traversal|local.*file.*inclu|lfi|cwe-22|cwe-23|cwe-36/.test(indicators)) {
     return { type: 'traversal', subType: 'PathTraversal', owasp: ['A01:2021'] };
   }
 
+  // -------------------------------------------------------------------
   // File Upload
+  // -------------------------------------------------------------------
   if (/file.*upload|unrestricted.*upload|cwe-434/.test(indicators)) {
     return { type: 'upload', subType: 'FileUpload', owasp: ['A04:2021'] };
   }
 
+  // -------------------------------------------------------------------
   // IDOR / Broken Access Control
-  if (/idor|insecure.*direct.*object|cwe-639/.test(indicators)) {
+  // -------------------------------------------------------------------
+  if (/idor|insecure.*direct.*object|broken.*access.*control|cwe-639|cwe-284|cwe-285/.test(indicators)) {
     return { type: 'access', subType: 'IDOR', owasp: ['A01:2021'] };
+  }
+
+  // -------------------------------------------------------------------
+  // Authentication issues
+  // -------------------------------------------------------------------
+  if (/auth(?!oriz)|broken.*auth|cwe-287|cwe-306|cwe-522|session.*fixat|cwe-384/.test(indicators)) {
+    if (/session.*fixat|cwe-384/.test(indicators)) {
+      return { type: 'auth', subType: 'SessionFixation', owasp: ['A07:2021'] };
+    }
+    return { type: 'auth', subType: 'Authentication', owasp: ['A07:2021'] };
+  }
+
+  // -------------------------------------------------------------------
+  // CORS misconfiguration
+  // -------------------------------------------------------------------
+  if (/cors|cross.*origin.*resource|cwe-942|access-control-allow-origin/.test(indicators)) {
+    return { type: 'config', subType: 'CORSMisconfiguration', owasp: ['A05:2021'] };
+  }
+
+  // -------------------------------------------------------------------
+  // Insecure cookies / headers
+  // -------------------------------------------------------------------
+  if (/insecure.*cookie|missing.*httponly|missing.*secure.*flag|samesite|cwe-614|cwe-1004/.test(indicators)) {
+    return { type: 'config', subType: 'InsecureCookie', owasp: ['A05:2021'] };
+  }
+  if (/missing.*header|security.*header|x-frame-options|x-content-type|strict-transport|cwe-693|cwe-1021/.test(indicators)) {
+    return { type: 'config', subType: 'MissingSecurityHeader', owasp: ['A05:2021'] };
+  }
+
+  // -------------------------------------------------------------------
+  // Cryptography
+  // -------------------------------------------------------------------
+  if (/crypto|encrypt|hash|cwe-327|cwe-326|cwe-328|weak.*algorithm|md5|sha1(?!.)|des(?!cri)|rc4/.test(indicators)) {
+    return { type: 'crypto', subType: 'WeakCrypto', owasp: ['A02:2021'] };
+  }
+
+  // -------------------------------------------------------------------
+  // Dependency / Supply-chain
+  // -------------------------------------------------------------------
+  if (/cve-|vulnerable.*depend|outdated.*package|known.*vulnerab/.test(indicators)) {
+    return { type: 'dependency', subType: 'VulnerableDependency', owasp: ['A06:2021'] };
   }
 
   return { type: 'other', subType: 'Unknown', owasp: [] };
 }
 
 /**
- * Generate a unique ID for a vulnerability
+ * Generate a deterministic, content-based ID for a vulnerability.
+ * Uses a SHA-256 hash of (source + checkId + file + line) so the same
+ * finding always produces the same ID — enabling cross-parser dedup.
+ *
  * @param {string} source - Analyzer name
  * @param {string} checkId - Check/rule ID
  * @param {object} location - Location object
- * @returns {string}
+ * @returns {string} Deterministic vulnerability ID
  */
 export function generateVulnerabilityId(source, checkId, location) {
-  const timestamp = Date.now();
-  const random = Math.random().toString(36).substring(2, 11);
-  const fileHash = location.file ? location.file.split('/').pop() : 'unknown';
+  const file = location.file || 'unknown';
   const line = location.line || 0;
-  
-  return `${source.toUpperCase()}-${checkId || 'UNKNOWN'}-${fileHash}-${line}-${random}`;
+  const col = location.column || 0;
+
+  // Build a canonical key from the four identity components
+  const canonical = [
+    (source || 'unknown').toUpperCase(),
+    (checkId || 'UNKNOWN'),
+    file,
+    String(line),
+    String(col)
+  ].join('|');
+
+  const hash = createHash('sha256').update(canonical).digest('hex').substring(0, 12);
+  const fileShort = file.split('/').pop();
+
+  return `${source.toUpperCase()}-${checkId || 'UNKNOWN'}-${fileShort}-${line}-${hash}`;
 }

@@ -1,11 +1,14 @@
 /**
- * Analyzes HTTP responses to detect vulnerability indicators
- * Distinguishes real vulnerabilities from false positives
+ * Analyzes HTTP responses to detect vulnerability indicators.
+ * Distinguishes real vulnerabilities from false positives with
+ * comprehensive pattern matching for SQL, NoSQL, SSRF, XXE, and more.
  */
 
 export class ResponseAnalyzer {
   /**
-   * Detect database-specific error messages in response
+   * Detect database-specific error messages in response.
+   * Covers MySQL, PostgreSQL, MSSQL, Oracle, SQLite, MongoDB, CouchDB, and Cassandra.
+   *
    * @param {object} response - HTTP response object
    * @returns {object} Detection result
    */
@@ -18,7 +21,9 @@ export class ResponseAnalyzer {
         /mysqlclient\./i,
         /mysql_fetch/i,
         /mysql_query/i,
-        /mysql_num_rows/i
+        /mysql_num_rows/i,
+        /com\.mysql\.jdbc/i,
+        /mariadb/i
       ],
       postgresql: [
         /postgresql.*error/i,
@@ -26,7 +31,9 @@ export class ResponseAnalyzer {
         /pg_exec\(\)/i,
         /syntax error at or near/i,
         /unterminated quoted string/i,
-        /invalid input syntax/i
+        /invalid input syntax/i,
+        /current transaction is aborted/i,
+        /PSQLException/i
       ],
       mssql: [
         /microsoft sql server/i,
@@ -34,18 +41,43 @@ export class ResponseAnalyzer {
         /unclosed quotation mark/i,
         /\[sql server\]/i,
         /line \d+:/i,
-        /incorrect syntax near/i
+        /incorrect syntax near/i,
+        /SqlException/i,
+        /nvarchar.*value/i
       ],
       oracle: [
         /ora-\d{5}/i,
         /oracle error/i,
         /oracle.*driver/i,
-        /warning.*oci_/i
+        /warning.*oci_/i,
+        /quoted string not properly terminated/i
       ],
       sqlite: [
         /sqlite.*error/i,
         /sqlite3::/i,
-        /unrecognized token/i
+        /unrecognized token/i,
+        /SQLITE_ERROR/i,
+        /near ".*": syntax error/i
+      ],
+      mongodb: [
+        /MongoError/i,
+        /MongoServerError/i,
+        /mongo.*exception/i,
+        /\$where.*not.*allowed/i,
+        /bad query/i,
+        /BSONObj.*valid/i,
+        /can't canonicalize query/i,
+        /FieldPath.*doesn't start with/i
+      ],
+      couchdb: [
+        /couchdb/i,
+        /bad_request.*invalid/i,
+        /doc_validation/i
+      ],
+      cassandra: [
+        /cassandra.*error/i,
+        /SyntaxException/i,
+        /InvalidQueryException/i
       ]
     };
 
@@ -145,7 +177,15 @@ export class ResponseAnalyzer {
   }
 
   /**
-   * Detect input validation errors (false positive indicator)
+   * Detect input validation errors (false positive indicator).
+   * A validation error means the app properly rejected malicious input —
+   * this is NOT a vulnerability indicator.
+   *
+   * NOTE: HTTP 400 alone is NOT treated as validation. Many injection
+   * payloads trigger 400 from the framework while the injection still
+   * reaches the backend. We only flag 400 when the body also contains
+   * explicit validation language.
+   *
    * @param {object} response - HTTP response
    * @returns {boolean} True if validation error detected
    */
@@ -157,24 +197,39 @@ export class ResponseAnalyzer {
     const validationPatterns = [
       /invalid input/i,
       /validation failed/i,
-      /bad request/i,
-      /malformed/i,
+      /malformed request/i,
       /invalid parameter/i,
       /parameter.*invalid/i,
       /input.*rejected/i,
-      /not allowed/i
+      /field.*required/i,
+      /must be a valid/i,
+      /does not match.*pattern/i,
+      /failed.*constraint/i,
+      /expected.*but got/i,
+      /not a valid.*format/i
     ];
 
-    // HTTP 400 is often validation error
-    if (response.status === 400) {
+    const hasValidationBody = validationPatterns.some(pattern => pattern.test(bodyText));
+
+    // HTTP 400 is only a validation indicator when the body confirms it.
+    // A bare 400 without validation language could still be an injection vector.
+    if (response.status === 400 && hasValidationBody) {
       return true;
     }
 
-    return validationPatterns.some(pattern => pattern.test(bodyText));
+    // HTTP 422 (Unprocessable Entity) is a strong validation signal
+    if (response.status === 422) {
+      return true;
+    }
+
+    // Body-only patterns (any status code)
+    return hasValidationBody;
   }
 
   /**
-   * Detect WAF/firewall blocking (false positive indicator)
+   * Detect WAF/firewall blocking (false positive indicator).
+   * Extended with AWS WAF, Azure Front Door, F5 BIG-IP, Sucuri, and more.
+   *
    * @param {object} response - HTTP response
    * @returns {object} WAF detection result
    */
@@ -183,25 +238,39 @@ export class ResponseAnalyzer {
       ? response.body
       : JSON.stringify(response.body);
 
+    const headerText = response.headers
+      ? (typeof response.headers === 'string'
+        ? response.headers
+        : Object.entries(response.headers).map(([k, v]) => `${k}: ${v}`).join(' '))
+      : '';
+
+    const combined = bodyText + ' ' + headerText;
+
     const wafPatterns = {
-      cloudflare: [/cloudflare/i, /cf-ray/i],
-      akamai: [/akamai/i],
-      imperva: [/imperva/i, /incapsula/i],
-      modsecurity: [/mod_security/i, /modsec/i],
+      cloudflare: [/cloudflare/i, /cf-ray/i, /cf-chl-bypass/i],
+      akamai: [/akamai/i, /akamai.*ghost/i, /x-akamai-transformed/i],
+      imperva: [/imperva/i, /incapsula/i, /visid_incap/i],
+      modsecurity: [/mod_security/i, /modsec/i, /NOYB/i],
+      awswaf: [/aws.*waf/i, /awselb/i, /x-amzn-requestid/i, /request blocked.*aws/i],
+      azureFrontDoor: [/azure.*front.*door/i, /afd-/i],
+      f5BigIP: [/big-?ip/i, /f5.*network/i, /TS[0-9a-f]{8}/i],
+      sucuri: [/sucuri/i, /x-sucuri/i],
+      barracuda: [/barracuda/i, /barra_counter_session/i],
+      fortinet: [/fortiweb/i, /fortigate/i],
       generic: [
         /blocked.*security/i,
         /request.*blocked/i,
         /access denied/i,
-        /forbidden/i
+        /forbidden/i,
+        /security.*violation/i,
+        /your request has been blocked/i,
+        /suspicious.*activity/i
       ]
     };
 
     for (const [waf, patterns] of Object.entries(wafPatterns)) {
       for (const pattern of patterns) {
-        const headerText = response.headers
-            ? Object.entries(response.headers).map(([k, v]) => `${k}: ${v}`).join(' ')
-            : '';
-        if (pattern.test(bodyText) || pattern.test(headerText)) {
+        if (pattern.test(combined)) {
           return {
             detected: true,
             waf,
@@ -222,6 +291,146 @@ export class ResponseAnalyzer {
     }
 
     return { detected: false, waf: null };
+  }
+
+  /**
+   * Detect SSRF indicators in a response.
+   * Checks for internal IP/metadata responses that indicate successful SSRF.
+   *
+   * @param {object} response - HTTP response
+   * @returns {object} SSRF detection result
+   */
+  static detectSSRFIndicators(response) {
+    const bodyText = typeof response.body === 'string'
+      ? response.body
+      : JSON.stringify(response.body);
+
+    const ssrfPatterns = {
+      awsMetadata: [
+        /ami-id/i,
+        /instance-id.*i-[0-9a-f]/i,
+        /security-credentials/i,
+        /iam\/info/i,
+        /meta-data\//i
+      ],
+      gcpMetadata: [
+        /computeMetadata/i,
+        /v1\/project/i,
+        /service-accounts.*default/i
+      ],
+      azureMetadata: [
+        /Metadata.*true/i,
+        /Microsoft\.Compute/i,
+        /azureenvironment/i
+      ],
+      internalServices: [
+        /root:.*:0:0/i,      // /etc/passwd content
+        /localhost/i,
+        /127\.0\.0\.1/i,
+        /0\.0\.0\.0/i,
+        /10\.\d+\.\d+\.\d+/,
+        /172\.(1[6-9]|2[0-9]|3[01])\.\d+\.\d+/,
+        /192\.168\.\d+\.\d+/
+      ]
+    };
+
+    for (const [source, patterns] of Object.entries(ssrfPatterns)) {
+      for (const pattern of patterns) {
+        if (pattern.test(bodyText)) {
+          return {
+            detected: true,
+            source,
+            pattern: pattern.source,
+            confidence: 'HIGH'
+          };
+        }
+      }
+    }
+
+    return { detected: false, source: null, confidence: 'NONE' };
+  }
+
+  /**
+   * Detect XXE indicators in a response.
+   * Checks for file content disclosure or out-of-band DNS interactions.
+   *
+   * @param {object} response - HTTP response
+   * @returns {object} XXE detection result
+   */
+  static detectXXEIndicators(response) {
+    const bodyText = typeof response.body === 'string'
+      ? response.body
+      : JSON.stringify(response.body);
+
+    const xxePatterns = [
+      /root:.*:0:0/i,                     // /etc/passwd
+      /\[boot loader\]/i,                 // win.ini
+      /\[extensions\]/i,                  // win.ini
+      /ENTITY.*SYSTEM/i,                  // XXE entity reflected
+      /DOCTYPE.*\[/i,                     // DTD reflected
+      /java\.io\.FileNotFoundException/i, // Java file error
+      /javax\.xml/i                       // Java XML parser error
+    ];
+
+    for (const pattern of xxePatterns) {
+      if (pattern.test(bodyText)) {
+        return {
+          detected: true,
+          pattern: pattern.source,
+          confidence: 'HIGH'
+        };
+      }
+    }
+
+    return { detected: false, confidence: 'NONE' };
+  }
+
+  /**
+   * Detect XSS reflection in response body.
+   * Checks if common XSS payloads appear unescaped in the response.
+   *
+   * @param {object} response - HTTP response
+   * @param {string} [payload] - The specific payload that was sent
+   * @returns {object} XSS detection result
+   */
+  static detectXSSReflection(response, payload) {
+    const bodyText = typeof response.body === 'string'
+      ? response.body
+      : JSON.stringify(response.body);
+
+    // Check if the exact payload is reflected unescaped
+    if (payload && bodyText.includes(payload)) {
+      return {
+        detected: true,
+        type: 'reflected',
+        confidence: 'HIGH',
+        detail: 'Payload reflected unescaped in response body'
+      };
+    }
+
+    // Check for common XSS indicators
+    const xssPatterns = [
+      /<script[^>]*>.*?alert/i,
+      /onerror\s*=/i,
+      /onload\s*=/i,
+      /onmouseover\s*=/i,
+      /javascript:/i,
+      /<svg[^>]*onload/i,
+      /<img[^>]*onerror/i
+    ];
+
+    for (const pattern of xssPatterns) {
+      if (pattern.test(bodyText)) {
+        return {
+          detected: true,
+          type: 'reflected',
+          pattern: pattern.source,
+          confidence: 'MEDIUM'
+        };
+      }
+    }
+
+    return { detected: false, confidence: 'NONE' };
   }
 
   /**
