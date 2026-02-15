@@ -2,7 +2,7 @@
 
 **AI-powered DAST tool that bridges static analysis with automated exploitation validation.**
 
-Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL, Gitleaks, OSV, Syft, Noir) and uses OpenAI GPT-4 combined with Playwright browser automation and Stagehand AI to dynamically test, validate, and produce developer-friendly reports.
+Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL, Gitleaks, OSV, Syft, Noir) and uses LLM agents combined with Playwright browser automation to dynamically test, validate, and produce developer-friendly reports. Supports 6 LLM providers out of the box.
 
 ---
 
@@ -11,18 +11,21 @@ Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL,
 | Feature | Description |
 |---------|-------------|
 | **Multi-Analyzer Support** | Parses output from 7 static analyzers with auto-detection |
-| **24 Agent Tools** | 15 browser tools, 4 Stagehand AI tools, 5 exploitation workflow tools |
-| **LLM-Crafted Payloads** | Context-aware payloads derived from static analysis metadata |
+| **6 LLM Providers** | OpenAI, DeepSeek, Qwen, GitHub Models, Google Gemini, GitHub Copilot |
+| **20 Agent Tools** | 15 browser tools + 5 exploitation workflow tools |
+| **16 Vulnerability Categories** | Injection, XSS, SSRF, XXE, traversal, auth, secrets, and more |
+| **Content-Based Deduplication** | SHA-256 hashing eliminates duplicate findings across analyzers |
+| **4-Class Classification** | CONFIRMED / LIKELY / BLOCKED / NOT_REPRODUCIBLE |
+| **5-Level Proof System** | L0 (no evidence) through L4 (critical impact demonstrated) |
+| **Priority Scoring** | Severity + confidence + exploitability bonus, sorted highest-first |
+| **Testing Thoroughness Tracking** | HTTP request counting ensures the agent actually tests each vulnerability |
 | **Source Code Mapping** | Links every finding to exact `file:line:column` for developers |
 | **Industry Reports** | SARIF 2.1.0 for IDE integration, HTML for stakeholders, JSON for CI |
-| **Stagehand AI Browser** | Natural-language browser actions, autonomous multi-step workflows |
 | **Route Intelligence** | Automatic Express router parsing for endpoint discovery |
 | **Auth Propagation** | JWT/cookie capture and injection across tests |
 | **WAF Bypass Engine** | Deterministic encoding, technique, and WAF-specific bypass generation |
-| **Response Analysis** | Database error detection, WAF detection, boolean/timing analysis |
-| **5-Level Proof System** | L0 (no evidence) through L4 (critical impact demonstrated) |
-| **4-Class Classification** | CONFIRMED / LIKELY / BLOCKED / NOT_REPRODUCIBLE |
-| **CI/CD Mode** | Exit codes (`0`=pass, `1`=confirmed, `2`=error) and machine-readable reports |
+| **Response Analysis** | DB error detection (MySQL, PostgreSQL, MSSQL, Oracle, SQLite, MongoDB, CouchDB, Cassandra), 11 WAF signatures, boolean/timing analysis |
+| **CI/CD Mode** | Exit codes (`0`=pass, `1`=confirmed, `2`=error), `--fail-on-likely`, `--fail-on-blocked` |
 
 ---
 
@@ -32,11 +35,13 @@ Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL,
 - [Project Structure](#project-structure)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [Auth & Providers](#auth--providers)
 - [Supported Analyzers](#supported-analyzers)
 - [Agent Tools](#agent-tools)
 - [Classification System](#classification-system)
 - [Output & Reports](#output--reports)
 - [Prompt Templates](#prompt-templates)
+- [CI/CD Mode](#cicd-mode)
 - [Configuration](#configuration)
 - [Testing](#testing)
 - [Extending the Tool](#extending-the-tool)
@@ -48,54 +53,49 @@ Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL,
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                        DYNAMIC SECURITY TESTER                              │
-├──────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐  │
-│  │    Parser     │──>│    Queue     │──>│   Executor   │──>│   Reports    │  │
-│  │              │   │  Generator   │   │              │   │              │  │
-│  │ Semgrep      │   │              │   │ OpenAI GPT   │   │ SARIF 2.1.0  │  │
-│  │ Trivy        │   │ Groups by    │   │ LLM Agent    │   │ HTML         │  │
-│  │ CodeQL       │   │ vuln type    │   │ + Bypass     │   │ JSON Summary │  │
-│  │ Syft / OSV   │   │              │   │   Engine     │   │ CI Report    │  │
-│  │ Gitleaks     │   │              │   │ + Payload    │   │              │  │
-│  │ Noir         │   │              │   │   Generator  │   │              │  │
-│  └──────────────┘   └──────────────┘   └──────┬───────┘   └──────────────┘  │
-│         │                                     │                              │
-│         v                                     v                              │
-│  ┌──────────────┐                    ┌─────────────────┐                     │
-│  │    Route     │                    │ Browser Manager  │                     │
-│  │ Intelligence │                    │  (15 tools)      │                     │
-│  │              │                    │                  │                     │
-│  │ Express      │                    │ HTTP Requests    │                     │
-│  │ Router       │                    │ Form Filling     │                     │
-│  │ Parsing      │                    │ Force Click      │                     │
-│  └──────┬───────┘                    │ Script Exec      │                     │
-│         │                            │ Auth Capture     │                     │
-│         v                            └────────┬────────┘                     │
-│  ┌──────────────┐                             │                              │
-│  │     Auth     │                    ┌────────v────────┐                     │
-│  │   Manager    │<──────────────────>│ Stagehand AI    │                     │
-│  │              │                    │  (4 tools)       │                     │
-│  │ JWT/Cookie   │                    │                  │                     │
-│  │ Injection    │                    │ Act / Extract    │                     │
-│  └──────────────┘                    │ Observe / Agent  │                     │
-│                                      └────────┬────────┘                     │
-│                                               │                              │
-│                                      ┌────────v────────┐                     │
-│                                      │   Response      │                     │
-│                                      │   Analyzer      │                     │
-│                                      │                  │                     │
-│                                      │ DB Errors        │                     │
-│                                      │ WAF Detection    │                     │
-│                                      │ Boolean/Timing   │                     │
-│                                      │ Classification   │                     │
-│                                      └─────────────────┘                     │
-└──────────────────────────────────────────────────────────────────────────────┘
++---------------------------------------------------------------------------+
+|                        DYNAMIC SECURITY TESTER                            |
++---------------------------------------------------------------------------+
+|                                                                           |
+|  +-------------+   +-------------+   +-------------+   +-------------+   |
+|  |   Parser    |-->|    Queue    |-->|  Executor   |-->|   Reports   |   |
+|  |             |   |  Generator  |   |             |   |             |   |
+|  | Semgrep     |   |             |   | LLM Agent   |   | SARIF 2.1.0 |   |
+|  | Trivy       |   | 16 category |   | + Bypass    |   | HTML        |   |
+|  | CodeQL      |   | buckets w/  |   |   Engine    |   | JSON Summary|   |
+|  | Syft / OSV  |   | priority    |   | + Payload   |   | CI Report   |   |
+|  | Gitleaks    |   | scoring     |   |   Generator |   |             |   |
+|  | Noir        |   |             |   | + Response  |   |             |   |
+|  |             |   |             |   |   Analyzer  |   |             |   |
+|  +------+------+   +-------------+   +------+------+   +-------------+   |
+|         |                                   |                             |
+|         v                                   v                             |
+|  +-------------+                   +------------------+                   |
+|  |    Route    |                   | Browser Manager  |                   |
+|  | Intelligence|                   |  (15 tools)      |                   |
+|  |             |                   |                  |                   |
+|  | Express     |                   | HTTP Requests    |                   |
+|  | Router      |                   | Form Filling     |                   |
+|  | Parsing     |                   | Force Click      |                   |
+|  +------+------+                   | Script Exec      |                   |
+|         |                          | Auth Capture     |                   |
+|         v                          +--------+---------+                   |
+|  +-------------+                            |                             |
+|  |    Auth     |                   +--------v---------+                   |
+|  |   Manager   |<---------------->| Vuln Classifier  |                   |
+|  |             |                   |                  |                   |
+|  | JWT/Cookie  |                   | 4-Level Status   |                   |
+|  | Injection   |                   | 5-Level Proof    |                   |
+|  +-------------+                   +------------------+                   |
+|                                                                           |
+|  +--------------------------------------------------------------------+  |
+|  |                     Provider Registry                              |  |
+|  |  OpenAI | DeepSeek | Qwen | GitHub Models | Gemini | Copilot      |  |
+|  +--------------------------------------------------------------------+  |
++---------------------------------------------------------------------------+
 ```
 
-**Pipeline:** Parse static results -> Queue by vuln type -> Execute via LLM agent with browser tools -> Classify results -> Generate reports
+**Pipeline:** Parse static results -> Deduplicate (SHA-256) -> Queue by vuln type with priority scoring -> Execute via LLM agent with browser tools -> Classify results (4-level) -> Generate reports
 
 ---
 
@@ -104,20 +104,22 @@ Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL,
 ```
 dynamictester/
 ├── src/
-│   ├── main.js                          # Entry point — interactive CLI workflow
+│   ├── main.js                          # Entry point — interactive CLI, auth subcommand, CI mode
 │   │
 │   ├── agents/
-│   │   └── executor.js                  # OpenAI GPT agent loop (tool-calling, 50 turns, rate limiting)
+│   │   └── executor.js                  # LLM agent loop (tool-calling, 75 turns, stall detection)
 │   │
 │   ├── auth/
 │   │   └── auth-manager.js              # JWT/cookie capture and injection (singleton)
 │   │
+│   ├── config/
+│   │   └── config-manager.js            # Persistent config at ~/.config/dynamictester/
+│   │
 │   ├── mcp/
-│   │   ├── browser-server.js            # BrowserManager — 15 Playwright tools for the LLM
-│   │   └── stagehand-manager.js         # StagehandManager — 4 AI browser tools
+│   │   └── browser-server.js            # BrowserManager — 15 Playwright tools for the LLM
 │   │
 │   ├── parser/
-│   │   ├── normalizer.js                # Severity/confidence normalization, vuln categorization
+│   │   ├── normalizer.js                # Severity/confidence normalization, SHA-256 dedup, 18+ categories
 │   │   ├── parser-factory.js            # Auto-detect analyzer type + registry of 7 parsers
 │   │   ├── parser-interface.js          # BaseParser abstract class
 │   │   ├── result-parser.js             # Multi-file parsing coordinator, dedup, validation
@@ -132,11 +134,23 @@ dynamictester/
 │   │       ├── gitleaks-parser.js       # Gitleaks secrets scanner (v7 + v8)
 │   │       └── noir-parser.js           # OWASP Noir API endpoints
 │   │
+│   ├── providers/
+│   │   ├── provider-interface.js        # BaseProvider abstract class
+│   │   ├── provider-registry.js         # Provider registration and client creation
+│   │   ├── openai-provider.js           # OpenAI (GPT-4o, o1, o3-mini)
+│   │   ├── deepseek-provider.js         # DeepSeek (V3, R1)
+│   │   ├── qwen-provider.js             # Qwen / Alibaba Cloud (max, plus, coder, flash, turbo)
+│   │   ├── github-provider.js           # GitHub Models (GPT-4o, DeepSeek-R1, Llama, Mistral)
+│   │   ├── google-provider.js           # Google Gemini (API key) + Antigravity OAuth
+│   │   ├── copilot-provider.js          # GitHub Copilot (Claude, Gemini, GPT via device code)
+│   │   ├── antigravity-client.js        # OpenAI-compatible adapter for Antigravity API
+│   │   └── google-oauth.js              # Google OAuth 2.0 + PKCE for Antigravity
+│   │
 │   ├── queue/
-│   │   └── queue-generator.js           # Group vulnerabilities by type into queue files
+│   │   └── queue-generator.js           # 16 category buckets with priority scoring
 │   │
 │   ├── reporting/
-│   │   ├── report-generator.js          # SARIF 2.1.0, HTML, and developer summary generation
+│   │   ├── report-generator.js          # SARIF 2.1.0, HTML with executive summary, developer JSON
 │   │   └── ci-reporter.js              # CI/CD exit codes (0=pass, 1=confirmed, 2=error)
 │   │
 │   ├── testing/
@@ -145,22 +159,24 @@ dynamictester/
 │   │   ├── exploitation-levels.js       # 5-level proof system (L0-L4)
 │   │   ├── intelligence-aggregator.js   # Context gathering for payload crafting
 │   │   ├── payload-generator.js         # LLM-powered payload generation with anti-hallucination
-│   │   ├── response-analyzer.js         # DB error detection, WAF detection, boolean/timing analysis
+│   │   ├── response-analyzer.js         # DB error detection, WAF detection, SSRF/XXE/XSS analysis
 │   │   ├── test-interface.js            # VulnerabilityTester base class (confirm -> fingerprint -> exploit)
 │   │   ├── bypass-engine.test.js        # Tests for bypass engine (18 tests)
 │   │   ├── payload-generator.test.js    # Tests for payload generator (88 tests)
-│   │   └── response-analyzer.test.js    # Tests for response analyzer (26 tests)
+│   │   └── response-analyzer.test.js    # Tests for response analyzer (27 tests)
 │   │
 │   └── utils/
 │       ├── error-handling.js            # Error classification, retry eligibility, delay calculation
 │       └── rate-limiter.js              # RateLimiter — retry with backoff, parallel stagger
 │
-├── prompts/                             # LLM prompt templates
-│   ├── exploit-injection.txt            # SQL/command injection testing
-│   ├── exploit-xss.txt                  # Cross-site scripting testing
-│   ├── exploit-traversal.txt            # Path traversal testing
-│   ├── exploit-xxe.txt                  # XML external entity testing
-│   ├── exploit-redirect.txt             # Open redirect testing
+├── prompts/                             # LLM prompt templates (9 files)
+│   ├── exploit-injection.txt            # SQL/command injection
+│   ├── exploit-xss.txt                  # Cross-site scripting
+│   ├── exploit-ssrf.txt                 # Server-side request forgery
+│   ├── exploit-auth.txt                 # Authentication and session security
+│   ├── exploit-traversal.txt            # Path traversal
+│   ├── exploit-xxe.txt                  # XML external entity
+│   ├── exploit-redirect.txt             # Open redirect
 │   ├── exploit-secrets.txt              # Hardcoded secrets validation
 │   └── exploit-generic.txt              # General vulnerability testing
 │
@@ -177,21 +193,35 @@ dynamictester/
 
 - **Node.js** 18 or later
 - **npm**
-- **OpenAI API key** with access to GPT-4 or GPT-4o
+- At least one LLM provider configured (see [Auth & Providers](#auth--providers))
 
 ### Setup
 
 ```bash
-# Install dependencies
+# Clone and install
+git clone https://github.com/anishalx/dynamictester.git
+cd dynamictester
 npm install
-
-# Set OpenAI API key
-export OPENAI_API_KEY="your-api-key-here"
-# Or create a .env file:
-# echo 'OPENAI_API_KEY=your-api-key-here' > .env
 
 # Install Playwright browsers
 npx playwright install chromium
+
+# Configure an LLM provider (interactive)
+node src/main.js auth login
+```
+
+### Quick Setup with OpenAI
+
+If you just want to get started with OpenAI:
+
+```bash
+# Set API key via environment variable (no auth login needed)
+export OPENAI_API_KEY="sk-your-key-here"
+# Or create a .env file:
+echo 'OPENAI_API_KEY=sk-your-key-here' > .env
+
+# Run
+node src/main.js
 ```
 
 ---
@@ -199,48 +229,81 @@ npx playwright install chromium
 ## Quick Start
 
 ```bash
+# Interactive mode
 node src/main.js
+
+# With provider/model override
+node src/main.js --provider=copilot --model=claude-sonnet-4.5
+
+# CI/CD mode
+node src/main.js --ci --fail-on-likely
 ```
 
-The interactive CLI prompts for:
+### CLI Flags
 
-1. **Path to analyzer results** -- one or more static analysis output files (comma-separated)
-2. **Target URL** -- the running application to test (e.g. `http://localhost:3000`)
-3. **Output directory** -- where to save reports and evidence
+| Flag | Description |
+|------|-------------|
+| `--provider=<name>` | Override LLM provider (`openai`, `deepseek`, `qwen`, `github`, `google`, `copilot`) |
+| `--model=<name>` | Override LLM model (e.g., `gpt-4o`, `claude-sonnet-4.5`, `deepseek-chat`) |
+| `--ci` | Enable CI/CD mode -- generate CI report and exit with status code |
+| `--fail-on-likely` | In CI mode, also fail for LIKELY-classified findings |
+| `--fail-on-blocked` | In CI mode, also fail for BLOCKED-classified findings |
+
+### Auth Subcommand
+
+```bash
+node src/main.js auth login     # Configure a new LLM provider
+node src/main.js auth status    # Show configured providers and defaults
+node src/main.js auth logout    # Remove provider credentials
+```
 
 ### Example Session
 
 ```
-🔍 Dynamic Security Tester (OpenAI Powered)
+🔍 Dynamic Security Tester
 ────────────────────────────────────────────────────────────────
 Supported analyzers: semgrep, gitleaks, trivy, osv, syft, noir, codeql
 ────────────────────────────────────────────────────────────────
 
-? Path to analyzer result file(s): semgrep.json, trivy.json
+? Path to analyzer result file(s): semgrep.json, trivy.json, gitleaks.json
 
 📋 Step 1: Parsing static analysis results...
-✅ Parsed 24 vulnerabilities from 2 files
-   - semgrep: 15 findings
-   - trivy: 9 findings
+✅ Parsed 91 vulnerabilities from 3 files
+   - semgrep: 41 findings
+   - gitleaks: 47 findings
+   - trivy: 3 findings
 
 📋 Step 2: Generating exploitation queues...
-✅ Created injection_exploitation_queue.json with 8 vulnerabilities
-   - from semgrep: 5
-   - from trivy: 3
-✅ Created xss_exploitation_queue.json with 6 vulnerabilities
-✅ Created secrets_exploitation_queue.json with 4 vulnerabilities
+✅ Created 7 queues:
+   - injection: 11 vulnerabilities (priority-sorted)
+   - xss: 10 vulnerabilities
+   - traversal: 4 vulnerabilities
+   - redirect: 1 vulnerability
+   - deserialization: 1 vulnerability
+   - secrets: 57 vulnerabilities
+   - other: 7 vulnerabilities
 
 📋 Step 3: Reviewing vulnerabilities...
-🎯 Found 8 INJECTION vulnerabilities:
+🎯 Found 11 INJECTION vulnerabilities:
    1. SQLi in routes/login.ts:34
-   2. CommandInjection in utils/exec.js:12
+   2. NoSQLi in data/mongodb.js:18
    3. ...
 
 ? Run dynamic exploitation tests for injection? (Y/n)
 
-🚀 Starting OpenAI exploitation agent (gpt-4o)...
+🚀 Starting exploitation agent (claude-sonnet-4.5 via GitHub Copilot)...
    Rate limit handling: 3 retries with exponential backoff
-   Loaded 8 vulnerabilities from queue
+   Loaded 11 vulnerabilities from queue
+
+🤖 Turn 1:
+   🔧 read_queue_file
+🤖 Turn 2:
+   🔧 generate_payloads
+🤖 Turn 3:
+   🔧 browser_http_request
+      📊 Evidence saved: 1/11
+      🔴 CONFIRMED — Level 4: Critical Impact Demonstrated
+   ...
 
 📋 Generating reports...
 ✅ SARIF report saved: output/report.sarif.json
@@ -250,11 +313,11 @@ Supported analyzers: semgrep, gitleaks, trivy, osv, syft, noir, codeql
 ════════════════════════════════════════════════════════
   CI SECURITY SCAN SUMMARY
 ════════════════════════════════════════════════════════
-  Total Findings:      24
+  Total Findings:      91
   🔴 CONFIRMED:        3
   🟡 LIKELY:           2
   🟠 BLOCKED:          1
-  🟢 NOT REPRODUCIBLE: 18
+  🟢 NOT REPRODUCIBLE: 85
 ────────────────────────────────────────────────────────
   Exit Code: 1
   Result: FAIL: 3 CONFIRMED exploit(s) found
@@ -263,11 +326,60 @@ Supported analyzers: semgrep, gitleaks, trivy, osv, syft, noir, codeql
 
 ---
 
+## Auth & Providers
+
+The tool supports 6 LLM providers. All providers expose an OpenAI-compatible client interface, so the exploitation agent works identically regardless of provider.
+
+### Provider Overview
+
+| Provider | Name | Default Model | Auth Method | Env Var Fallback |
+|----------|------|---------------|-------------|------------------|
+| **OpenAI** | `openai` | `gpt-4o` | API key | `OPENAI_API_KEY` |
+| **DeepSeek** | `deepseek` | `deepseek-chat` | API key | `DEEPSEEK_API_KEY` |
+| **Qwen** | `qwen` | `qwen-max` | DashScope API key + region | `DASHSCOPE_API_KEY` |
+| **GitHub Models** | `github` | `gpt-4o` | GitHub PAT (`ghp_*`) | `GITHUB_TOKEN` |
+| **Google Gemini** | `google` | `gemini-2.5-flash` | API key or Antigravity OAuth | `GOOGLE_API_KEY` |
+| **GitHub Copilot** | `copilot` | `claude-sonnet-4.5` | Device code OAuth | `GITHUB_COPILOT_TOKEN` |
+
+### Provider Selection Priority
+
+1. **`--provider` / `--model` CLI flags** -- highest priority
+2. **Stored defaults** -- set via `auth login` or auto-saved
+3. **Single configured provider** -- auto-selected
+4. **`OPENAI_API_KEY` env var** -- backward-compatible fallback
+5. **Interactive prompt** -- if multiple providers are configured
+
+### Configuration Storage
+
+Provider credentials are stored in `~/.config/dynamictester/config.json`:
+
+```json
+{
+  "version": 1,
+  "defaultProvider": "copilot",
+  "defaultModel": "claude-sonnet-4.5",
+  "providers": {
+    "copilot": { "token": "ghu_...", "configured": true },
+    "openai": { "apiKey": "sk-...", "configured": true }
+  }
+}
+```
+
+### Provider-Specific Notes
+
+**GitHub Copilot** authenticates via GitHub Device Code flow (same as VS Code). Run `auth login`, select Copilot, and follow the browser prompt. Models are fetched dynamically from the API.
+
+**Google Gemini** has two modes:
+- **API Key** (simple) -- enter a Gemini API key, uses `generativelanguage.googleapis.com`
+- **Antigravity OAuth** (advanced) -- full Google Cloud OAuth with PKCE, enables access to additional models (Claude, GPT via Antigravity)
+
+**Qwen** prompts for a region (International/Singapore, US/Virginia, or China/Beijing) which determines the API endpoint.
+
+---
+
 ## Supported Analyzers
 
-All parsers extend `BaseParser` from `src/parser/parser-interface.js` and implement `validate(data)` and `async parse(data)`.
-
-Analyzer type is auto-detected from the JSON structure by `detectAnalyzerType()` in `parser-factory.js`.
+All parsers extend `BaseParser` and implement `validate(data)` and `async parse(data)`. Analyzer type is auto-detected from JSON structure.
 
 | Analyzer | Format | Parser | What It Finds |
 |----------|--------|--------|---------------|
@@ -287,17 +399,17 @@ Pass multiple files comma-separated:
 ? Path to analyzer result file(s): semgrep.json, trivy.json, gitleaks.json
 ```
 
-Results are deduplicated, normalized, and merged into unified exploitation queues.
+Results are deduplicated using content-based SHA-256 hashing (on source, checkId, file, line, column), normalized, and merged into unified exploitation queues.
 
 ---
 
 ## Agent Tools
 
-The LLM agent has access to **24 tools** across three categories.
+The LLM agent has access to **20 tools** across two categories.
 
 ### Browser Tools (15)
 
-Playwright-based browser automation exposed to the GPT agent:
+Playwright-based browser automation exposed to the LLM agent:
 
 | Tool | Description |
 |------|-------------|
@@ -311,22 +423,11 @@ Playwright-based browser automation exposed to the GPT agent:
 | `browser_force_click` | JavaScript click (bypasses overlays/visibility) |
 | `browser_scroll` | Scroll page (up/down/top/bottom) |
 | `browser_wait_for_element` | Wait for SPA content to appear |
-| `browser_http_request` | Direct HTTP/API requests (GET/POST/PUT/DELETE/PATCH) |
+| `browser_http_request` | Direct HTTP/API requests (GET/POST/PUT/DELETE/PATCH) with response timing |
 | `browser_execute_script` | Execute JavaScript in page context |
 | `browser_capture_auth` | Capture JWT/cookies after login |
 | `browser_get_auth_status` | Check stored auth tokens |
 | `browser_clear_auth` | Clear all stored auth tokens |
-
-### Stagehand AI Tools (4)
-
-AI-powered browser interactions via `@browserbasehq/stagehand`. Use natural language instead of CSS selectors:
-
-| Tool | Description |
-|------|-------------|
-| `stagehand_act` | Execute browser action in natural language (e.g. "click the Login button") |
-| `stagehand_extract` | Extract structured data from page using AI (forms, errors, links, tables) |
-| `stagehand_observe` | Discover available actions and interactive elements on a page |
-| `stagehand_agent` | Execute multi-step browser workflows autonomously (login sequences, navigation) |
 
 ### Exploitation Workflow Tools (5)
 
@@ -334,15 +435,15 @@ Orchestration tools for the exploitation pipeline:
 
 | Tool | Description |
 |------|-------------|
-| `read_queue_file` | Load the vulnerability queue JSON |
+| `read_queue_file` | Load the vulnerability queue JSON with summary stats |
 | `generate_payloads` | Generate context-aware payload guidance per vulnerability and stage |
-| `analyze_response` | Analyze HTTP response for DB errors, WAF blocking, boolean/timing signals |
+| `analyze_response` | Analyze HTTP response for DB errors, WAF blocking, SSRF/XXE/XSS indicators, boolean/timing signals |
 | `generate_bypasses` | Generate WAF/filter bypass variations for blocked payloads |
-| `save_evidence` | Save exploitation evidence with full source code mapping |
+| `save_evidence` | Save exploitation evidence with full source code mapping and 4-level classification |
 
 ### `browser_http_request` Example
 
-The most important tool for API testing:
+The most important tool for API testing. Returns response timing for time-based injection detection:
 
 ```javascript
 browser_http_request({
@@ -352,7 +453,14 @@ browser_http_request({
   contentType: "application/json"
 })
 // Returns:
-// { status: "success", httpStatus: 200, body: "...", json: {...} }
+// {
+//   status: "success",
+//   httpStatus: 200,
+//   body: "...",
+//   json: {...},
+//   responseTimeMs: 1243,
+//   responseTimeSec: 1.243
+// }
 ```
 
 ---
@@ -383,6 +491,14 @@ The classifier (`src/testing/classifier.js`) automatically distinguishes between
 - **Security controls** (prepared statements, WAF, input validation) -- false positive
 - **External constraints** (auth required, server down, rate limiting) -- needs investigation
 
+### Testing Thoroughness
+
+The agent loop tracks HTTP requests between `save_evidence` calls. If `save_evidence` is called for a web vulnerability without any prior HTTP requests (`browser_http_request`, `browser_navigate`, etc.), the system:
+1. Logs a warning in the console
+2. Records `httpRequestsMade: 0` in the evidence file for audit trail
+
+This prevents the LLM from shortcutting by saving NOT_REPRODUCIBLE without actually testing.
+
 ---
 
 ## Output & Reports
@@ -392,26 +508,27 @@ The classifier (`src/testing/classifier.js`) automatically distinguishes between
 ```
 output/
 ├── evidence/                       # Individual finding evidence
-│   ├── evidence-vuln-001.json
-│   └── evidence-vuln-002.json
-├── deliverables/                   # Exploitation queues
+│   ├── evidence-SEMGREP-xxx-1234.json
+│   └── evidence-GITLEAKS-xxx-1234.json
+├── deliverables/                   # Exploitation queues (priority-sorted)
 │   ├── injection_exploitation_queue.json
-│   └── xss_exploitation_queue.json
-├── findings_summary.json           # Quick summary
+│   ├── xss_exploitation_queue.json
+│   └── secrets_exploitation_queue.json
+├── findings_summary.json           # Quick summary with classifications
 ├── developer_summary.json          # Categorized findings for developers
 ├── report.sarif.json               # SARIF 2.1.0 for IDE integration
-├── report.html                     # Visual HTML report
+├── report.html                     # Visual HTML report with executive summary
 └── ci-report.json                  # CI/CD machine-readable report
 ```
 
 ### Evidence Format
 
-Each finding includes full source code mapping:
+Each finding includes full source code mapping, 4-level classification, and testing audit trail:
 
 ```json
 {
-  "findingId": "javascript.sequelize.sql-injection",
-  "timestamp": "2024-01-15T10:30:00.000Z",
+  "findingId": "SEMGREP-javascript.sequelize.sql-injection-34-28",
+  "timestamp": "2025-02-15T10:30:00.000Z",
 
   "sourceLocation": {
     "file": "routes/login.ts",
@@ -434,13 +551,23 @@ Each finding includes full source code mapping:
   },
 
   "remediation": "Use parameterized queries with Sequelize replacements",
-  "status": "CONFIRMED"
+
+  "classification": "CONFIRMED",
+  "status": "CONFIRMED",
+  "level": 4,
+  "levelName": "Critical Impact Demonstrated",
+  "confidence": "HIGH",
+  "classificationReason": "Data extraction proven with critical impact",
+  "includeInReport": true,
+  "requiresAction": true,
+  "ciExitCode": 1,
+  "httpRequestsMade": 5
 }
 ```
 
 ### SARIF Report
 
-Integrates with VS Code (SARIF Viewer extension), GitHub Code Scanning, and other IDEs:
+Uses tool-scoped rule IDs (DST-001, DST-002, ...) and includes classification metadata. Integrates with VS Code (SARIF Viewer extension), GitHub Code Scanning, and other IDEs:
 
 ```json
 {
@@ -449,7 +576,7 @@ Integrates with VS Code (SARIF Viewer extension), GitHub Code Scanning, and othe
   "runs": [{
     "tool": { "driver": { "name": "DynamicSecurityTester", "version": "1.0.0" } },
     "results": [{
-      "ruleId": "CWE-89",
+      "ruleId": "DST-001",
       "level": "error",
       "locations": [{
         "physicalLocation": {
@@ -458,7 +585,9 @@ Integrates with VS Code (SARIF Viewer extension), GitHub Code Scanning, and othe
         }
       }],
       "properties": {
-        "status": "CONFIRMED",
+        "classification": "CONFIRMED",
+        "level": 4,
+        "confidence": "HIGH",
         "endpoint": "/api/login",
         "payload": "' OR '1'='1'--",
         "proof": "Authenticated as admin without password"
@@ -471,47 +600,40 @@ Integrates with VS Code (SARIF Viewer extension), GitHub Code Scanning, and othe
 ### HTML Report
 
 Dark-themed visual report with:
-- Confirmed vs Not Exploitable summary with counts
+- Executive summary with risk assessment and false positive rate
+- Classification badges (CONFIRMED / LIKELY / BLOCKED / NOT_REPRODUCIBLE)
+- Severity-sorted findings
 - Source code locations (`file:line:column`)
-- Payload details and exploitation proof (HTML-escaped for safety)
+- Payload details and exploitation proof (HTML-escaped)
 - Remediation suggestions
 - OWASP and CWE references
-
-### CI Report
-
-Machine-readable JSON with exit code reasoning:
-
-```json
-{
-  "timestamp": "2024-01-15T10:35:00.000Z",
-  "summary": {
-    "total": 24,
-    "confirmed": 3,
-    "likely": 2,
-    "blocked": 1,
-    "notReproducible": 18
-  },
-  "exitCode": 1,
-  "exitReason": "FAIL: 3 CONFIRMED exploit(s) found",
-  "confirmedExploits": [{ "id": "...", "endpoint": "/api/login", "cwe": "CWE-89" }]
-}
-```
 
 ---
 
 ## Prompt Templates
 
-All prompts are **universal** -- they work on any application by deriving endpoints from source code paths.
+9 prompt templates cover 16 vulnerability categories. Each prompt is universal and derives endpoints from source code paths.
 
-| Prompt | Vulnerability Type | Key Features |
-|--------|-------------------|--------------|
-| `exploit-injection.txt` | SQLi, Command Injection | Technology-aware (MySQL, PostgreSQL, SQLite, MSSQL) |
-| `exploit-xss.txt` | Cross-Site Scripting | Context-aware (HTML, Attribute, JavaScript, DOM) |
-| `exploit-traversal.txt` | Path Traversal | OS-aware with encoding variations |
-| `exploit-xxe.txt` | XML External Entity | Parser-specific payloads |
-| `exploit-redirect.txt` | Open Redirect | Whitelist bypass techniques |
-| `exploit-secrets.txt` | Hardcoded Secrets | Credential validation and impact assessment |
-| `exploit-generic.txt` | Any vulnerability | General testing methodology |
+### Prompt Mapping
+
+| Queue Category | Prompt File | Key Features |
+|----------------|-------------|--------------|
+| `injection` | `exploit-injection.txt` | Technology-aware (MySQL, PostgreSQL, SQLite, MSSQL, MongoDB) |
+| `xss` | `exploit-xss.txt` | Context-aware (HTML, Attribute, JavaScript, DOM) |
+| `ssrf` | `exploit-ssrf.txt` | Cloud metadata, internal service discovery, bypass techniques |
+| `auth` | `exploit-auth.txt` | JWT, session management, privilege escalation |
+| `traversal` | `exploit-traversal.txt` | OS-aware with encoding variations |
+| `xxe` | `exploit-xxe.txt` | Parser-specific payloads |
+| `redirect` | `exploit-redirect.txt` | Whitelist bypass techniques |
+| `secrets` | `exploit-secrets.txt` | Credential validation and impact assessment |
+| `csrf` | `exploit-generic.txt` | General testing methodology |
+| `deserialization` | `exploit-generic.txt` | General testing methodology |
+| `upload` | `exploit-generic.txt` | General testing methodology |
+| `access` | `exploit-generic.txt` | General testing methodology |
+| `crypto` | `exploit-generic.txt` | General testing methodology |
+| `config` | `exploit-generic.txt` | General testing methodology |
+| `dependency` | `exploit-generic.txt` | General testing methodology |
+| `other` | `exploit-generic.txt` | General testing methodology |
 
 ### Endpoint Discovery
 
@@ -527,22 +649,61 @@ The route parser (`src/parser/route-parser.js`) also statically analyzes Express
 
 ---
 
+## CI/CD Mode
+
+Run with `--ci` to get machine-readable output and exit codes:
+
+```bash
+# Basic CI mode (fails only on CONFIRMED exploits)
+node src/main.js --ci
+
+# Strict mode (fails on CONFIRMED + LIKELY)
+node src/main.js --ci --fail-on-likely
+
+# Maximum strictness (fails on CONFIRMED + LIKELY + BLOCKED)
+node src/main.js --ci --fail-on-likely --fail-on-blocked
+```
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Pass -- no actionable findings |
+| `1` | Fail -- confirmed exploits found (or LIKELY/BLOCKED if flags set) |
+| `2` | Error -- scan failed to complete |
+
+### CI Report
+
+Machine-readable JSON at `output/ci-report.json`:
+
+```json
+{
+  "timestamp": "2025-02-15T10:35:00.000Z",
+  "summary": {
+    "total": 91,
+    "confirmed": 3,
+    "likely": 2,
+    "blocked": 1,
+    "notReproducible": 85
+  },
+  "exitCode": 1,
+  "exitReason": "FAIL: 3 CONFIRMED exploit(s) found",
+  "confirmedExploits": [{ "id": "...", "endpoint": "/api/login", "cwe": "CWE-89" }]
+}
+```
+
+---
+
 ## Configuration
-
-### Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `OPENAI_API_KEY` | Yes | OpenAI API key with GPT-4/GPT-4o access |
 
 ### Key Settings
 
 **Agent loop** (`src/agents/executor.js`):
 
 ```javascript
-const maxTurns = 50;                    // Max agent conversation turns
+const maxTurns = 75;                    // Max agent conversation turns
 const MAX_TOOL_RESULT_LENGTH = 8000;    // Truncate tool results to avoid token limits
-const model = options.model || 'gpt-4o'; // LLM model
+const temperature = 0.2;                // Low temperature for consistent exploitation
 ```
 
 **Browser timeouts** (`src/mcp/browser-server.js`):
@@ -556,11 +717,21 @@ const SHORT_TIMEOUT = 2000;    // 2 seconds for quick checks
 
 ```javascript
 {
-  maxRetries: 3,        // Retry attempts (uses ?? for 0-safe defaults)
+  maxRetries: 3,        // Retry attempts
   staggerDelay: 2000,   // Delay between parallel task starts (ms)
   retryDelay: 5000      // Base delay between retries (ms)
 }
 ```
+
+**Retry delays by error type** (`src/utils/error-handling.js`):
+
+| Error Type | Retry Strategy |
+|------------|---------------|
+| Rate Limit (429) | 30s -> 40s -> 50s (max 120s), respects Retry-After header |
+| Server Error (5xx) | 10s -> 20s -> 30s (max 60s) |
+| Timeout | Exponential backoff with jitter |
+| Network Error | Exponential backoff with jitter |
+| Auth Error (401/403) | Not retried (fatal) |
 
 ---
 
@@ -585,8 +756,8 @@ npx vitest run -t "detectDatabaseErrors"
 |-----------|-------|----------|
 | `src/testing/bypass-engine.test.js` | 18 | Encoding bypasses, technique bypasses, WAF-specific bypasses, attempt tracking |
 | `src/testing/payload-generator.test.js` | 88 | Payload generation, anti-hallucination filtering, stage-based payloads |
-| `src/testing/response-analyzer.test.js` | 26 | DB error detection, WAF detection, boolean comparison, timing analysis |
-| **Total** | **132** | |
+| `src/testing/response-analyzer.test.js` | 27 | DB error detection, WAF detection, validation error handling, boolean comparison, timing analysis |
+| **Total** | **133** | |
 
 ---
 
@@ -606,15 +777,12 @@ export class NewParser extends BaseParser {
   }
 
   validate(data) {
-    // Return true if data matches expected format
     return data && Array.isArray(data.findings);
   }
 
   async parse(data) {
     const jsonData = typeof data === 'string' ? JSON.parse(data) : data;
-    if (!this.validate(jsonData)) {
-      throw new Error('Invalid format');
-    }
+    if (!this.validate(jsonData)) throw new Error('Invalid format');
 
     return jsonData.findings.map(f => {
       const { type, subType } = categorizeVulnerability({
@@ -626,28 +794,15 @@ export class NewParser extends BaseParser {
       return {
         id: f.id,
         source: 'newanalyzer',
-        sourceVersion: this.analyzerVersion,
         type,
         subType,
         severity: normalizeSeverity(f.severity),
         confidence: 'MEDIUM',
-        location: {
-          file: f.file || 'unknown',
-          line: f.line || 0,
-          column: f.column || 0,
-          endLine: f.endLine || 0,
-          endColumn: f.endColumn || 0,
-          snippet: f.snippet || ''
-        },
+        location: { file: f.file || 'unknown', line: f.line || 0, column: f.column || 0 },
         description: f.message,
         remediation: f.fix || '',
         cwe: f.cwe || [],
-        owasp: [],
-        cvss: null,
-        cve: [],
-        metadata: {},
-        checkId: f.ruleId,
-        reference: f.url || ''
+        checkId: f.ruleId
       };
     });
   }
@@ -673,16 +828,44 @@ if (data.findings && data.toolName === 'newanalyzer') {
 }
 ```
 
+### Adding a New LLM Provider
+
+1. **Create** `src/providers/<name>-provider.js` extending `BaseProvider`:
+
+```javascript
+import { BaseProvider } from './provider-interface.js';
+import OpenAI from 'openai';
+
+export class NewProvider extends BaseProvider {
+  get name() { return 'newprovider'; }
+  get displayName() { return 'New Provider'; }
+  getModels() { return [{ id: 'model-v1', name: 'Model V1', description: '...' }]; }
+  getDefaultModel() { return 'model-v1'; }
+
+  async authenticate() { /* prompt for API key, save via config-manager */ }
+  async validateAuth() { /* check stored credentials */ }
+  createClient(config) { return new OpenAI({ apiKey: config.apiKey, baseURL: '...' }); }
+}
+```
+
+2. **Register in** `src/providers/provider-registry.js`:
+
+```javascript
+import { NewProvider } from './newprovider-provider.js';
+
+const PROVIDER_REGISTRY = Object.freeze({
+  // ... existing providers
+  newprovider: NewProvider
+});
+```
+
 ### Adding a New Browser Tool
 
-In `src/mcp/browser-server.js`:
-
-1. Add the method to `BrowserManager`:
+In `src/mcp/browser-server.js`, add the method to `BrowserManager` and register in `getTools()`:
 
 ```javascript
 async customAction({ param1 }) {
   try {
-    // Implementation using this.page (Playwright Page)
     return { status: 'success', data: result };
   } catch (e) {
     return { status: 'error', message: e.message };
@@ -690,50 +873,14 @@ async customAction({ param1 }) {
 }
 ```
 
-2. Register in `getTools()`:
-
-```javascript
-{
-  name: 'browser_custom_action',
-  description: 'What this tool does',
-  parameters: {
-    type: 'object',
-    properties: {
-      param1: { type: 'string', description: 'Parameter description' }
-    },
-    required: ['param1']
-  },
-  handler: this.customAction.bind(this)
-}
-```
-
 ### Adding a New Prompt Template
 
-1. Create `prompts/exploit-<type>.txt` with the system prompt
-2. Add mapping in `src/main.js`:
-
-```javascript
-const promptMapping = {
-  // ... existing mappings
-  newtype: 'exploit-newtype.txt'
-};
-```
+1. Create `prompts/exploit-<type>.txt` with `{{WEB_URL}}` and `{{QUEUE_PATH}}` placeholders
+2. Add mapping in `src/main.js` `promptMapping` object
 
 ### Adding a New Vulnerability Category
 
-Add to the categorization map in `src/parser/normalizer.js`:
-
-```javascript
-if (/newpattern|cwe-XXX/.test(indicators)) {
-  return { type: 'newtype', subType: 'NewSubType', owasp: ['AXX:2021'] };
-}
-```
-
-And add the queue bucket in `src/queue/queue-generator.js`:
-
-```javascript
-const queues = { /* existing */, newtype: [] };
-```
+Add to the categorization map in `src/parser/normalizer.js` and the queue bucket in `src/queue/queue-generator.js`.
 
 ---
 
@@ -745,21 +892,12 @@ const queues = { /* existing */, newtype: [] };
 |-------|----------|
 | "No vulnerabilities found" | Verify analyzer output format matches expected structure. Run with a single file first. |
 | "Rate limit exceeded" | Built-in `RateLimiter` handles this automatically with exponential backoff. |
-| "Selector timeout" | Use `browser_force_click` or `stagehand_act` with natural language. |
+| "Request timed out" | Retried automatically (up to 3 times). If persistent, try a different provider. |
+| "Selector timeout" | Use `browser_force_click` instead of `browser_click`. |
 | "Element not found" | Use `browser_get_response` first to discover valid selectors. |
-| "Stagehand not initialized" | Stagehand requires a running browser. Call `browser_navigate` first. |
 | "Invalid analyzer format" | Check auto-detection in `parser-factory.js`. Pass the correct JSON structure. |
-
-### Rate Limiting
-
-The `RateLimiter` class handles API rate limits automatically:
-
-| Error Type | Retry Strategy |
-|------------|---------------|
-| Rate Limit (429) | 30s -> 40s -> 50s (max 120s) |
-| Server Error (5xx) | 10s -> 20s -> 30s (max 60s) |
-| Overloaded / Capacity | Same as server error |
-| Network Error | Exponential backoff with jitter |
+| No configured providers | Run `node src/main.js auth login` or set `OPENAI_API_KEY` environment variable. |
+| Provider auth expired | Run `node src/main.js auth login` to re-authenticate. Google Antigravity tokens refresh automatically. |
 
 ### Debug Tips
 
@@ -768,6 +906,7 @@ The `RateLimiter` class handles API rate limits automatically:
 3. Open `report.html` in a browser for visual inspection
 4. Install the [SARIF Viewer](https://marketplace.visualstudio.com/items?itemName=MS-SarifVSCode.sarif-viewer) VS Code extension to see findings inline
 5. Look at `ci-report.json` for classification breakdown
+6. Check `httpRequestsMade` field in evidence files to verify testing thoroughness
 
 ---
 
@@ -777,13 +916,13 @@ The `RateLimiter` class handles API rate limits automatically:
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `openai` | ^6.15.0 | GPT-4/GPT-4o API client |
+| `openai` | ^6.15.0 | LLM API client (used by all providers) |
 | `playwright` | ^1.57.0 | Browser automation |
-| `@browserbasehq/stagehand` | ^3.0.8 | AI-powered browser interactions |
 | `zx` | ^8.8.5 | Shell utilities, `fs` and `path` helpers |
 | `inquirer` | ^9.3.8 | Interactive CLI prompts |
 | `chalk` | ^4.1.2 | Terminal colors |
 | `axios` | ^1.13.2 | HTTP client |
+| `dotenv` | ^17.3.1 | Environment variable loading from `.env` |
 | `js-yaml` | ^4.1.1 | YAML parsing |
 | `zod` | ^4.3.6 | Schema validation |
 
@@ -791,7 +930,7 @@ The `RateLimiter` class handles API rate limits automatically:
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `vitest` | ^4.0.18 | Test runner (132 tests) |
+| `vitest` | ^4.0.18 | Test runner (133 tests) |
 
 ---
 
@@ -806,12 +945,13 @@ ISC
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes (follow conventions in `AGENTS.md`)
-4. Run `npm test` to verify all 132 tests pass
+4. Run `npm test` to verify all 133 tests pass
 5. Submit a pull request
 
 Key areas for contribution:
 - New static analyzer parsers
-- Additional browser/Stagehand tools
+- New LLM providers
+- Additional browser tools
 - Improved prompt templates
 - Report format enhancements
 - Test coverage expansion
