@@ -137,8 +137,16 @@ describe('ResponseAnalyzer', () => {
   });
 
   describe('isValidationError', () => {
-    it('should detect HTTP 400 as validation error', () => {
+    it('should NOT flag bare HTTP 400 without validation body pattern', () => {
+      // "Bad Request" alone is not a validation message — it's a generic HTTP
+      // status text. Treating it as validation caused false negatives for
+      // injection detection (Phase 1.3 fix).
       const response = { body: 'Bad Request', status: 400 };
+      expect(ResponseAnalyzer.isValidationError(response)).toBe(false);
+    });
+
+    it('should detect HTTP 400 WITH validation body pattern', () => {
+      const response = { body: 'Bad Request: invalid input parameter', status: 400 };
       expect(ResponseAnalyzer.isValidationError(response)).toBe(true);
     });
 

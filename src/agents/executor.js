@@ -102,11 +102,20 @@ CRITICAL INSTRUCTIONS:
 5. If browser_click fails with timeout, use browser_force_click instead
 6. Save evidence for EACH vulnerability with FULL source mapping
 
+MANDATORY TESTING REQUIREMENT:
+- You MUST make at least one HTTP request (browser_http_request or browser_navigate) for EACH web vulnerability BEFORE calling save_evidence
+- Do NOT call save_evidence immediately after read_queue_file — reading the queue is NOT testing
+- Do NOT call save_evidence based solely on static analysis findings — you must actually probe the target
+- For each vulnerability: send a request, observe the response, THEN save evidence with the actual result
+- Exception: secrets/config/credential findings may not require HTTP testing. For these, explain in the evidence field why no HTTP request was needed
+- The system tracks HTTP requests between save_evidence calls. Evidence saved without prior HTTP requests is flagged as untested
+
 TESTING METHODOLOGY (3-STAGE WORKFLOW):
 For EACH vulnerability, follow this sequence:
 
 Stage 1 - CONFIRMATION: Call generate_payloads with stage="confirmation" first.
   Use the returned guidance and fallback payloads to detect if the vuln exists.
+  Send the payload via browser_http_request and observe the response.
   After each request, call analyze_response to interpret the result.
 
 Stage 2 - FINGERPRINT: If confirmed, call generate_payloads with stage="fingerprint".
@@ -138,11 +147,20 @@ Use the file path pattern to derive likely endpoints
 TOOL USAGE:
 - read_queue_file: Get ALL vulnerabilities with source context FIRST
 - generate_payloads: Call BEFORE testing each vuln (returns context + fallback payloads)
+- browser_http_request: REQUIRED — send the payload to the target and get a real response
 - analyze_response: Call AFTER each test request (interprets results)
 - generate_bypasses: Call when payload is BLOCKED (returns bypass variations)
-- browser_http_request: PREFERRED for API testing
 - browser_force_click: Use when normal click times out
-- save_evidence: Include full source mapping (file, line, column)
+- save_evidence: Call AFTER testing — include full source mapping, actual HTTP response, and observed behavior
+
+EVIDENCE QUALITY REQUIREMENTS:
+- The 'response' field MUST contain the actual HTTP status code and key response data from your test
+- The 'endpoint' field MUST contain the actual URL you tested
+- The 'method' field MUST contain the HTTP method you used
+- The 'payload' field MUST contain the exact payload you sent
+- The 'evidence' field MUST describe what you observed (not what you expected)
+- If exploitation failed, describe what the response actually showed (e.g., "HTTP 200, response contained sanitized output, no injection detected")
+- Set securityBlocker if security controls prevented exploitation (WAF, input validation, parameterized queries)
 
 COMPLETION:
 - You are NOT done until you have called save_evidence for EVERY vulnerability
@@ -422,13 +440,19 @@ COMPLETION:
       dataExtracted, criticalImpact, adminAccess, commandExecution,
       queryManipulated, unionSuccess, booleanConfirmed,
       injectionConfirmed, errorDetected, timingConfirmed,
-      externalBlocker, blockerReason, securityBlocker, securityReason
+      externalBlocker, blockerReason, securityBlocker, securityReason,
+      // Injected by tool tracking (not from LLM)
+      _httpRequestsMade
     } = params;
     
     const evidenceDir = path.join(outputDir, 'evidence');
     await fs.ensureDir(evidenceDir);
     
-    const fileName = `evidence-${id || 'unknown'}-${Date.now()}.json`;
+    // Sanitize ID for safe filename — Gitleaks IDs contain '/' and ':' (e.g.
+    // "GITLEAKS-target/lib/insecurity.ts:private-key:23") which would create
+    // nonexistent subdirectory paths and crash with ENOENT.
+    const safeId = (id || 'unknown').replace(/[\/\\:*?"<>|]/g, '-');
+    const fileName = `evidence-${safeId}-${Date.now()}.json`;
     const filePath = path.join(evidenceDir, fileName);
 
     // ---------------------------------------------------------------
@@ -517,7 +541,10 @@ COMPLETION:
       classificationReason: classification.reason,
       includeInReport: classification.includeInReport,
       requiresAction: classification.requiresAction,
-      ciExitCode: classification.ciExitCode
+      ciExitCode: classification.ciExitCode,
+
+      // Testing thoroughness audit trail
+      httpRequestsMade: _httpRequestsMade || 0
     };
     
     await fs.writeJSON(filePath, evidenceData, { spaces: 2 });
@@ -584,7 +611,7 @@ COMPLETION:
       type: 'function',
       function: {
         name: 'save_evidence',
-        description: 'Save exploitation evidence with FULL source code mapping. Include all source location fields for developer output.',
+        description: 'Save exploitation evidence with FULL source code mapping. IMPORTANT: You MUST make at least one HTTP request (browser_http_request or browser_navigate) BEFORE calling this tool for web vulnerabilities. Do NOT call save_evidence immediately after read_queue_file — you must actually test the vulnerability first. For secrets/config findings that do not require HTTP testing, set endpoint to "N/A" and explain in the evidence field why no HTTP request was needed. Include the actual HTTP response status, body excerpt, and observed behavior as proof of testing.',
         parameters: {
           type: 'object',
           properties: {
@@ -734,7 +761,7 @@ COMPLETION:
     { role: 'system', content: systemPrompt },
     { 
       role: 'user', 
-      content: `Target: ${targetUrl}\n\nVulnerabilities to test (${totalVulnerabilities} total):\n${vulnSummary}\n\nYou MUST test ALL ${totalVulnerabilities} vulnerabilities. Follow this workflow for EACH one:\n1. Call read_queue_file to load the full vulnerability queue\n2. For each vulnerability: call generate_payloads with stage="confirmation"\n3. Use browser_http_request to send test payloads to the target\n4. Call analyze_response to interpret the result\n5. If blocked, call generate_bypasses and retry\n6. Call save_evidence with the results (REQUIRED for every vulnerability)\n\nDo NOT stop until you have called save_evidence for every vulnerability. Start by calling read_queue_file NOW.` 
+      content: `Target: ${targetUrl}\n\nVulnerabilities to test (${totalVulnerabilities} total):\n${vulnSummary}\n\nYou MUST test ALL ${totalVulnerabilities} vulnerabilities. Follow this workflow for EACH one:\n1. Call read_queue_file to load the full vulnerability queue\n2. For each vulnerability: call generate_payloads with stage="confirmation"\n3. Use browser_http_request to ACTUALLY SEND test payloads to the target — this is REQUIRED before saving evidence\n4. Call analyze_response to interpret the ACTUAL response you received\n5. If blocked, call generate_bypasses and retry with bypass payloads\n6. Call save_evidence with the REAL results — include the actual HTTP status, response body, and observed behavior\n\nIMPORTANT: Every save_evidence call for a web vulnerability MUST be preceded by at least one browser_http_request. Do NOT save evidence without testing. The system tracks this and will flag untested evidence.\n\nDo NOT stop until you have called save_evidence for every vulnerability. Start by calling read_queue_file NOW.` 
     }
   ];
 
@@ -746,6 +773,7 @@ COMPLETION:
   const maxNudges = 3; // Max times to nudge model before accepting it's done
   let evidenceSavedCount = 0; // Track how many vulnerabilities have been tested
   let lastEvidenceTurn = 0; // Track when last evidence was saved (stall detection)
+  let httpRequestsSinceLastEvidence = 0; // Track HTTP requests between save_evidence calls
 
   try {
     while (turnCount < maxTurns) {
@@ -871,14 +899,31 @@ COMPLETION:
           const toolName = toolCall.function.name;
           const handler = toolHandlers[toolName];
           
-          if (handler) {
+           if (handler) {
             console.log(chalk.yellow(`   🔧 ${toolName}`));
             try {
               const args = JSON.parse(toolCall.function.arguments);
-              const result = await handler(args);
-              
-              // Track evidence saves for completion detection
+
+              // Track HTTP tool calls BEFORE handler call (so save_evidence can see the count)
+              const HTTP_TOOLS = ['browser_http_request', 'browser_navigate', 'browser_fill', 'browser_click', 'browser_force_click'];
+              if (HTTP_TOOLS.includes(toolName)) {
+                httpRequestsSinceLastEvidence++;
+              }
+
+              // Inject HTTP request count into save_evidence args BEFORE the handler runs
               if (toolName === 'save_evidence') {
+                const isSecretsOrConfig = /secret|config|credential|key|token|password/i.test(args.type || '');
+                if (!isSecretsOrConfig && httpRequestsSinceLastEvidence === 0) {
+                  console.log(chalk.yellow(`      ⚠️ save_evidence called without any HTTP requests — evidence may be untested`));
+                }
+                args._httpRequestsMade = httpRequestsSinceLastEvidence;
+              }
+
+              const result = await handler(args);
+
+              // Post-handler tracking: completion counts + reset HTTP counter
+              if (toolName === 'save_evidence') {
+                httpRequestsSinceLastEvidence = 0;
                 evidenceSavedCount++;
                 lastEvidenceTurn = turnCount;
                 console.log(chalk.cyan(`      📊 Evidence saved: ${evidenceSavedCount}/${totalVulnerabilities}`));

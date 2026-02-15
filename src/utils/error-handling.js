@@ -83,6 +83,12 @@ export function isRetryableError(error) {
     return true;
   }
 
+  // Generic timeout messages (e.g. Copilot's "Request timed out.")
+  // Matches: "timeout", "timed out", "Request timed out.", "connection timed out"
+  if (/\btimed?\s*out\b/i.test(message)) {
+    return true;
+  }
+
   // OpenAI specific errors
   if (/\boverloaded\b/i.test(message) ||
       /\bcapacity\b/i.test(message)) {
