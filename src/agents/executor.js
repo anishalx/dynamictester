@@ -10,7 +10,7 @@ import {
   formatDelay,
   sleep 
 } from '../utils/rate-limiter.js';
-import { createClientForProvider, getConfiguredProviders, getProvider } from '../providers/provider-registry.js';
+import { createClientForProvider, getProvider } from '../providers/provider-registry.js';
 import { PayloadGenerator } from '../testing/payload-generator.js';
 import { BypassEngine } from '../testing/bypass-engine.js';
 import { ResponseAnalyzer } from '../testing/response-analyzer.js';
@@ -21,8 +21,50 @@ import { formatLevel } from '../testing/exploitation-levels.js';
 // Maximum characters for tool results to avoid token limits
 const MAX_TOOL_RESULT_LENGTH = 8000;
 
+// Maximum number of messages before pruning old context
+const MAX_MESSAGES_BEFORE_PRUNE = 80;
+
+// Number of recent messages to preserve when pruning
+const MESSAGES_TO_KEEP = 30;
+
+// Maximum agent turns before stopping the exploitation loop
+const MAX_AGENT_TURNS = 75;
+
+// Default stagger delay (ms) between parallel agent starts
+const DEFAULT_STAGGER_DELAY = 2000;
+
+// Default max retries for parallel agent execution
+const DEFAULT_PARALLEL_RETRIES = 3;
+
 /**
- * Truncate a string to a maximum length
+ * Prune old messages from the conversation to prevent context window overflow.
+ * Keeps the system message, a summary of older context, and the most recent messages.
+ * @param {Array<object>} messages - The conversation messages array
+ * @returns {Array<object>} Pruned messages array
+ */
+function pruneMessages(messages) {
+  if (messages.length <= MAX_MESSAGES_BEFORE_PRUNE) return messages;
+
+  const systemMsg = messages[0]; // Always keep system message
+  const recentMessages = messages.slice(-MESSAGES_TO_KEEP);
+  const prunedCount = messages.length - MESSAGES_TO_KEEP - 1;
+
+  // Create a summary of what was pruned
+  const summaryMsg = {
+    role: 'user',
+    content: `[CONTEXT NOTE: ${prunedCount} older messages were summarized to fit context window. ` +
+      `You have been testing vulnerabilities. Continue where you left off — ` +
+      `check the most recent tool results and evidence save calls to see your progress.]`
+  };
+
+  return [systemMsg, summaryMsg, ...recentMessages];
+}
+
+/**
+ * Truncate a tool result to a maximum length while preserving valid JSON.
+ * @param {*} obj - The tool result object
+ * @param {number} [maxLen=MAX_TOOL_RESULT_LENGTH] - Max character length
+ * @returns {string} JSON string within the length limit
  */
 function truncateResult(obj, maxLen = MAX_TOOL_RESULT_LENGTH) {
   if (obj === undefined || obj === null) {
@@ -31,15 +73,22 @@ function truncateResult(obj, maxLen = MAX_TOOL_RESULT_LENGTH) {
   const str = JSON.stringify(obj);
   if (str.length <= maxLen) return str;
   
-  // Try to return a meaningful truncated version
-  if (typeof obj.content === 'string') {
+  // Try to return a meaningful truncated version with valid JSON
+  if (typeof obj.content === 'string' && maxLen > 500) {
     return JSON.stringify({ ...obj, content: obj.content.slice(0, maxLen - 500) + '... [TRUNCATED]' });
   }
-  if (typeof obj.text === 'string') {
+  if (typeof obj.text === 'string' && maxLen > 500) {
     return JSON.stringify({ ...obj, text: obj.text.slice(0, maxLen - 500) + '... [TRUNCATED]' });
   }
   
-  return str.slice(0, maxLen) + '... [TRUNCATED]';
+  // Fallback: wrap the truncated data in a valid JSON envelope
+  // instead of slicing raw JSON which produces invalid syntax
+  return JSON.stringify({
+    status: obj.status || 'success',
+    truncated: true,
+    partialData: str.slice(0, maxLen - 200),
+    message: `Result truncated from ${str.length} to ${maxLen} characters`
+  });
 }
 
 /**
@@ -66,12 +115,12 @@ export async function executeExploitationAgent(
   options = {}
 ) {
   let model = options.model || 'gpt-4o';
-  const maxRetries = options.maxRetries || 3;
+  const maxRetries = options.maxRetries ?? 3;
   let llmClient = options.client || new OpenAI();
   let providerName = options.providerName || 'openai';
   const providerConfig = options.providerConfig || {};
   const fallbackProviders = options.fallbackProviders || [];
-  let fallbackUsed = false;
+  const triedProviders = new Set(); // Track which providers have been tried for fallback
   const rateLimiter = new RateLimiter({ maxRetries, enableLogging: true });
   
   console.log(chalk.cyan(`🚀 Starting exploitation agent (${model})...`));
@@ -91,10 +140,10 @@ export async function executeExploitationAgent(
     console.log(chalk.yellow(`   Warning: Could not load queue file: ${e.message}`));
   }
   
-  // Interpolate variables
+  // Interpolate variables (using replacer functions to avoid $ backreference issues)
   systemPrompt = systemPrompt
-    .replace(/{{WEB_URL}}/g, targetUrl)
-    .replace(/{{QUEUE_PATH}}/g, queuePath);
+    .replace(/{{WEB_URL}}/g, () => targetUrl)
+    .replace(/{{QUEUE_PATH}}/g, () => queuePath);
   
   // Add universal context (no app-specific content)
   systemPrompt += `
@@ -562,13 +611,10 @@ COMPLETION:
     console.log(chalk.gray(`      ${statusIcon} ${classification.classification} — ${levelStr}`));
     
     // Also append to summary file for easy developer review
+    // Uses a lock file to prevent race conditions during parallel agent execution
     const summaryPath = path.join(outputDir, 'findings_summary.json');
-    let summary = [];
-    try {
-      summary = await fs.readJSON(summaryPath);
-    } catch (e) { /* File doesn't exist yet */ }
-    
-    summary.push({
+    const lockPath = summaryPath + '.lock';
+    const summaryEntry = {
       id: id,
       classification: classification.classification,
       status: classification.classification,
@@ -581,16 +627,65 @@ COMPLETION:
       endpoint: endpoint,
       success: success,
       requiresAction: classification.requiresAction
-    });
-    await fs.writeJSON(summaryPath, summary, { spaces: 2 });
+    };
+
+    // Retry loop for lock acquisition
+    const maxLockRetries = 10;
+    for (let lockAttempt = 0; lockAttempt < maxLockRetries; lockAttempt++) {
+      try {
+        // Acquire lock (exclusive create — fails if lock already exists)
+        await fs.writeFile(lockPath, String(process.pid), { flag: 'wx' });
+        try {
+          let summary = [];
+          try {
+            summary = await fs.readJSON(summaryPath);
+            if (!Array.isArray(summary)) summary = [];
+          } catch (e) { /* File doesn't exist yet or corrupt — start fresh array */ }
+          summary.push(summaryEntry);
+          await fs.writeJSON(summaryPath, summary, { spaces: 2 });
+        } finally {
+          // Release lock
+          await fs.remove(lockPath).catch(() => {});
+        }
+        break; // Success — exit retry loop
+      } catch (lockErr) {
+        if (lockErr.code === 'EEXIST' && lockAttempt < maxLockRetries - 1) {
+          // Lock held by another agent — wait and retry
+          await sleep(100 + Math.random() * 200);
+          continue;
+        }
+        // Final attempt or unexpected error — write without lock as fallback
+        console.log(chalk.yellow(`      ⚠️ Summary lock contention, writing without lock`));
+        let summary = [];
+        try {
+          summary = await fs.readJSON(summaryPath);
+          if (!Array.isArray(summary)) summary = [];
+        } catch (e) { /* start fresh */ }
+        summary.push(summaryEntry);
+        await fs.writeJSON(summaryPath, summary, { spaces: 2 });
+        break;
+      }
+    }
     
     return { status: 'success', path: filePath, classification: classification.classification, level: classification.level };
   }
 
   // Read queue file tool - returns ALL vulnerabilities (no limit)
+  // Path is restricted to the output directory or the original queue path
   async function read_queue_file({ filePath }) {
     try {
-      const data = await fs.readJSON(filePath || queuePath);
+      const resolvedPath = path.resolve(filePath || queuePath);
+      const resolvedOutputDir = path.resolve(outputDir);
+      const resolvedQueuePath = path.resolve(queuePath);
+
+      // Only allow reading the original queue file or files within the output directory
+      const isQueueFile = resolvedPath === resolvedQueuePath;
+      const isInOutputDir = resolvedPath.startsWith(resolvedOutputDir + path.sep) || resolvedPath === resolvedOutputDir;
+      if (!isQueueFile && !isInOutputDir) {
+        return { status: 'error', message: 'Access denied: file path must be the queue file or within the output directory' };
+      }
+
+      const data = await fs.readJSON(resolvedPath);
       // Return all vulnerabilities with summary stats
       const count = data.vulnerabilities?.length || 0;
       data.totalCount = count;
@@ -771,7 +866,7 @@ COMPLETION:
   ];
 
   let turnCount = 0;
-  const maxTurns = 75; // Increased to allow thorough testing of large queues
+  const maxTurns = MAX_AGENT_TURNS;
   let consecutiveErrors = 0;
   const maxConsecutiveErrors = 5;
   let consecutiveNudges = 0;
@@ -810,6 +905,15 @@ COMPLETION:
 
   try {
     while (turnCount < maxTurns) {
+      // Prune messages if context is growing too large
+      if (messages.length > MAX_MESSAGES_BEFORE_PRUNE) {
+        const before = messages.length;
+        const pruned = pruneMessages(messages);
+        messages.length = 0;
+        messages.push(...pruned);
+        console.log(chalk.gray(`   Context pruned: ${before} → ${messages.length} messages`));
+      }
+
       console.log(chalk.blue(`\n🤖 Turn ${turnCount + 1}:`));
 
       // Force tool use until evidence has been saved; use 'auto' once testing has started
@@ -914,10 +1018,11 @@ COMPLETION:
           // For non-quota errors, wait until consecutiveErrors reaches the threshold.
           const shouldTryFallback = isQuota || isModelMissing || consecutiveErrors >= maxConsecutiveErrors;
 
-          if (shouldTryFallback && !fallbackUsed && fallbackProviders.length > 0 && (isQuota || isModelMissing)) {
+          if (shouldTryFallback && fallbackProviders.length > 0 && (isQuota || isModelMissing)) {
             let swapped = false;
+            triedProviders.add(providerName); // Mark current provider as tried
             for (const fb of fallbackProviders) {
-              if (fb.name === providerName) continue; // skip current provider
+              if (fb.name === providerName || triedProviders.has(fb.name)) continue; // skip current and already-tried providers
               try {
                 const reason = isModelMissing
                   ? `Model "${model}" not accessible on ${providerName}`
@@ -927,13 +1032,14 @@ COMPLETION:
                 const fbProvider = getProvider(fb.name);
                 model = fb.model || fbProvider.getDefaultModel();
                 providerName = fb.name;
-                fallbackUsed = true;
+                payloadGenerator.model = model; // Keep payload generator in sync
                 consecutiveErrors = 0;
                 toolChoiceSupported = true; // Reset for new provider
                 swapped = true;
                 console.log(chalk.green(`   ✅ Switched to ${fb.name}/${model}`));
                 break;
               } catch (fbError) {
+                triedProviders.add(fb.name); // Mark failed fallback as tried
                 console.log(chalk.gray(`   Fallback ${fb.name} failed: ${fbError.message}`));
               }
             }
@@ -997,7 +1103,7 @@ COMPLETION:
               const args = JSON.parse(toolCall.function.arguments);
 
               // Track HTTP tool calls BEFORE handler call (so save_evidence can see the count)
-              const HTTP_TOOLS = ['browser_http_request', 'browser_navigate', 'browser_fill', 'browser_click', 'browser_force_click'];
+               const HTTP_TOOLS = ['browser_http_request', 'browser_navigate'];
               if (HTTP_TOOLS.includes(toolName)) {
                 httpRequestsSinceLastEvidence++;
               }
@@ -1013,11 +1119,12 @@ COMPLETION:
 
               const result = await handler(args);
 
-              // Post-handler tracking: completion counts + reset HTTP counter
+              // Post-handler tracking: completion counts + reset HTTP counter + reset bypass engine
               if (toolName === 'save_evidence') {
                 httpRequestsSinceLastEvidence = 0;
                 evidenceSavedCount++;
                 lastEvidenceTurn = turnCount;
+                bypassEngine.reset(); // Fresh bypass budget for next vulnerability
                 console.log(chalk.cyan(`      📊 Evidence saved: ${evidenceSavedCount}/${totalVulnerabilities}`));
               }
 
@@ -1153,8 +1260,8 @@ COMPLETION:
  * @returns {Promise<object>} Results summary
  */
 export async function executeAgentsInParallel(agents, options = {}) {
-  const staggerDelay = options.staggerDelay || 2000; // 2 seconds between agent starts
-  const maxRetries = options.maxRetries || 3;
+  const staggerDelay = options.staggerDelay ?? DEFAULT_STAGGER_DELAY;
+  const maxRetries = options.maxRetries ?? DEFAULT_PARALLEL_RETRIES;
   const rateLimiter = new RateLimiter({ 
     maxRetries, 
     staggerDelay,

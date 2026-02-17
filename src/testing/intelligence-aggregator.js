@@ -1,4 +1,5 @@
 import { fs, path } from 'zx';
+import chalk from 'chalk';
 
 /**
  * Intelligence context aggregator
@@ -63,7 +64,7 @@ export class IntelligenceAggregator {
 
       return context;
     } catch (error) {
-      console.warn('Failed to aggregate intelligence:', error.message);
+      console.warn(chalk.yellow('Failed to aggregate intelligence:'), error.message);
       return context;
     }
   }
@@ -80,16 +81,14 @@ export class IntelligenceAggregator {
     const filePath = path.join(this.analysisDir, 'deliverables', filename);
     
     try {
-      if (await fs.pathExists(filePath)) {
-        const content = await fs.readFile(filePath, 'utf8');
-        this.cache[filename] = content;
-        return content;
-      }
+      // Read directly instead of pathExists+readFile (avoids TOCTOU race)
+      const content = await fs.readFile(filePath, 'utf8');
+      this.cache[filename] = content;
+      return content;
     } catch (error) {
-      // File doesn't exist or can't be read
+      // File doesn't exist or can't be read — return null
+      return null;
     }
-
-    return null;
   }
 
   /**
@@ -157,14 +156,14 @@ export class IntelligenceAggregator {
    */
   extractLanguage(content) {
     const languages = {
-      'JavaScript': /javascript|node\.js|\.js/i,
-      'TypeScript': /typescript|\.ts/i,
-      'Python': /python|\.py|import |from |def /i,
-      'Ruby': /ruby|\.rb|require |class |module /i,
-      'PHP': /php|<?php|\$_GET|\$_POST/i,
-      'Java': /java|\.java|public class |import java/i,
-      'C#': /c#|\.cs|using System|namespace /i,
-      'Go': /golang|\.go|package main|import \"/i
+      'JavaScript': /javascript|node\.js|\.js\b/i,
+      'TypeScript': /typescript|\.ts\b/i,
+      'Python': /\bpython\b|\.py\b|import\s+\w+\s*\n|from\s+\w+\s+import\b|def\s+\w+\s*\(/i,
+      'Ruby': /\bruby\b|\.rb\b|require\s+['"]|class\s+\w+\s*<\s*\w/i,
+      'PHP': /\bphp\b|<\?php|\$_GET|\$_POST/i,
+      'Java': /\bjava\b|\.java\b|public\s+class\s+|import\s+java\./i,
+      'C#': /\bc#\b|\.cs\b|using\s+System|namespace\s+\w+/i,
+      'Go': /\bgolang\b|\.go\b|package\s+main|import\s+"/i
     };
 
     for (const [language, pattern] of Object.entries(languages)) {

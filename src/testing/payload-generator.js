@@ -30,12 +30,15 @@ export class PayloadGenerator {
    * @returns {object} Structured payload context for the LLM
    */
   generatePayloadContext(vulnerability, context, stage = 'confirmation', previousResults = null) {
-    const vulnType = vulnerability.vulnerabilityType || vulnerability.type || 'other';
+    const vuln = vulnerability || {};
+    const ctx = context || {};
+    const vulnType = vuln.vulnerabilityType || vuln.type || 'other';
+    const stageInstructions = this.getStageInstructions(stage, vulnType);
 
     return {
       systemGuidance: this.getSystemPrompt(vulnType),
-      stageInstructions: this.getStageInstructions(stage, vulnType),
-      technologyContext: this.buildPrompt(vulnerability, context, stage, previousResults),
+      stageInstructions,
+      technologyContext: this.buildPrompt(vuln, ctx, stage, previousResults),
       fallbackPayloads: this.getFallbackPayloads(vulnType, stage),
       vulnType,
       stage
@@ -150,9 +153,6 @@ export class PayloadGenerator {
       }
       prompt += `\n`;
     }
-
-    // Stage-specific instructions
-    prompt += this.getStageInstructions(stage, vulnerability.vulnerabilityType || vulnerability.type);
 
     return prompt;
   }

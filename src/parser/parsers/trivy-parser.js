@@ -1,5 +1,5 @@
 import { BaseParser } from '../parser-interface.js';
-import { normalizeSeverity } from '../normalizer.js';
+import { normalizeSeverity, generateVulnerabilityId } from '../normalizer.js';
 
 /**
  * Parser for Trivy vulnerability scanner output
@@ -28,22 +28,24 @@ export class TrivyParser extends BaseParser {
       
       // Process vulnerabilities (CVEs in dependencies)
       for (const vuln of result.Vulnerabilities || []) {
-        vulnerabilities.push({
-          id: vuln.VulnerabilityID,
-          source: 'trivy',
-          sourceVersion: this.analyzerVersion,
-          type: 'dependency',
-          subType: 'VulnerableDependency',
-          severity: normalizeSeverity(vuln.Severity),
-          confidence: 'HIGH',
-          location: {
+        const vulnLocation = {
             file: target,
             line: 0,
             column: 0,
             endLine: 0,
             endColumn: 0,
             snippet: `${vuln.PkgName}@${vuln.InstalledVersion}`
-          },
+          };
+
+        vulnerabilities.push({
+          id: generateVulnerabilityId('trivy', vuln.VulnerabilityID, vulnLocation),
+          source: 'trivy',
+          sourceVersion: this.analyzerVersion,
+          type: 'dependency',
+          subType: 'VulnerableDependency',
+          severity: normalizeSeverity(vuln.Severity),
+          confidence: 'HIGH',
+          location: vulnLocation,
           description: vuln.Title || vuln.Description || '',
           remediation: vuln.FixedVersion ? `Update ${vuln.PkgName} to version ${vuln.FixedVersion}` : 'No fix available',
           cwe: vuln.CweIDs || [],
@@ -69,23 +71,24 @@ export class TrivyParser extends BaseParser {
       // Process misconfigurations
       for (const misconfig of result.Misconfigurations || []) {
         const { type, subType } = this.mapMisconfigType(misconfig);
-        
-        vulnerabilities.push({
-          id: misconfig.ID,
-          source: 'trivy',
-          sourceVersion: this.analyzerVersion,
-          type,
-          subType,
-          severity: normalizeSeverity(misconfig.Severity),
-          confidence: 'MEDIUM',
-          location: {
+        const misconfigLocation = {
             file: misconfig.CauseMetadata?.Resource || target,
             line: misconfig.CauseMetadata?.StartLine || 0,
             column: 0,
             endLine: misconfig.CauseMetadata?.EndLine || 0,
             endColumn: 0,
             snippet: misconfig.CauseMetadata?.Code?.Lines?.[0]?.Content || ''
-          },
+          };
+        
+        vulnerabilities.push({
+          id: generateVulnerabilityId('trivy', misconfig.ID, misconfigLocation),
+          source: 'trivy',
+          sourceVersion: this.analyzerVersion,
+          type,
+          subType,
+          severity: normalizeSeverity(misconfig.Severity),
+          confidence: 'MEDIUM',
+          location: misconfigLocation,
           description: misconfig.Title || misconfig.Message,
           remediation: misconfig.Resolution || '',
           cwe: [],
@@ -104,22 +107,24 @@ export class TrivyParser extends BaseParser {
 
       // Process secrets found in container images
       for (const secret of result.Secrets || []) {
-        vulnerabilities.push({
-          id: `TRIVY-SECRET-${secret.RuleID}-${secret.StartLine}`,
-          source: 'trivy',
-          sourceVersion: this.analyzerVersion,
-          type: 'secrets',
-          subType: 'HardcodedSecret',
-          severity: normalizeSeverity(secret.Severity),
-          confidence: 'HIGH',
-          location: {
+        const secretLocation = {
             file: target,
             line: secret.StartLine || 0,
             column: 0,
             endLine: secret.EndLine || 0,
             endColumn: 0,
             snippet: secret.Match || ''
-          },
+          };
+
+        vulnerabilities.push({
+          id: generateVulnerabilityId('trivy', secret.RuleID, secretLocation),
+          source: 'trivy',
+          sourceVersion: this.analyzerVersion,
+          type: 'secrets',
+          subType: 'HardcodedSecret',
+          severity: normalizeSeverity(secret.Severity),
+          confidence: 'HIGH',
+          location: secretLocation,
           description: `Secret detected: ${secret.Title}`,
           remediation: 'Remove hardcoded secret',
           cwe: ['CWE-798'],

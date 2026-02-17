@@ -2,18 +2,14 @@ import { fs, path } from 'zx';
 import chalk from 'chalk';
 
 // -----------------------------------------------------------------------
-// Severity ordering for sorting — CRITICAL first
-// -----------------------------------------------------------------------
-const SEVERITY_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 };
-
-// -----------------------------------------------------------------------
 // Classification → SARIF level mapping
 // -----------------------------------------------------------------------
 const CLASSIFICATION_TO_LEVEL = {
   CONFIRMED: 'error',
   LIKELY: 'warning',
   BLOCKED: 'note',
-  NOT_REPRODUCIBLE: 'none'
+  NOT_REPRODUCIBLE: 'none',
+  TESTED_NOT_EXPLOITABLE: 'none'
 };
 
 // -----------------------------------------------------------------------
@@ -50,8 +46,12 @@ async function collectFindings(evidenceDir) {
 
   for (const file of files) {
     if (file.endsWith('.json') && file.startsWith('evidence-')) {
-      const data = await fs.readJSON(path.join(evidenceDir, file));
-      findings.push(data);
+      try {
+        const data = await fs.readJSON(path.join(evidenceDir, file));
+        findings.push(data);
+      } catch (e) {
+        console.warn(chalk.yellow(`  ⚠ Skipping corrupt evidence file: ${file} (${e.message})`));
+      }
     }
   }
 
@@ -62,9 +62,9 @@ async function collectFindings(evidenceDir) {
 // Helper — sort findings: CONFIRMED first, then by severity, then LIKELY, etc.
 // -----------------------------------------------------------------------
 function sortFindings(findings) {
-  const classOrder = { CONFIRMED: 0, LIKELY: 1, BLOCKED: 2, NOT_REPRODUCIBLE: 3 };
+  const classOrder = { CONFIRMED: 0, LIKELY: 1, BLOCKED: 2, NOT_REPRODUCIBLE: 3, TESTED_NOT_EXPLOITABLE: 3 };
 
-  return findings.sort((a, b) => {
+  return [...findings].sort((a, b) => {
     const classA = classOrder[a.classification || a.status] ?? 9;
     const classB = classOrder[b.classification || b.status] ?? 9;
     if (classA !== classB) return classA - classB;
@@ -89,12 +89,13 @@ function sortFindings(findings) {
  * @param {string} evidenceDir - Path to evidence directory
  * @param {string} outputPath - Output SARIF file path
  * @param {object} [metadata] - Optional metadata (targetUrl, version)
+ * @param {Array} [preCollected] - Pre-collected findings to avoid re-reading disk
  * @returns {Promise<object>} SARIF object
  */
-export async function generateSarifReport(evidenceDir, outputPath, metadata = {}) {
+export async function generateSarifReport(evidenceDir, outputPath, metadata = {}, preCollected = null) {
   console.log(chalk.blue('📋 Generating SARIF report...'));
 
-  const findings = sortFindings(await collectFindings(evidenceDir));
+  const findings = sortFindings(preCollected || await collectFindings(evidenceDir));
 
   // Build unique rules with tool-scoped IDs
   const rulesMap = new Map();
@@ -236,12 +237,13 @@ function generateSarifMessage(finding) {
  * @param {string} evidenceDir - Path to evidence directory
  * @param {string} outputPath - Output HTML file path
  * @param {object} [metadata] - Optional metadata (targetUrl)
+ * @param {Array} [preCollected] - Pre-collected findings to avoid re-reading disk
  * @returns {Promise<string>} HTML string
  */
-export async function generateHtmlReport(evidenceDir, outputPath, metadata = {}) {
+export async function generateHtmlReport(evidenceDir, outputPath, metadata = {}, preCollected = null) {
   console.log(chalk.blue('📋 Generating HTML report...'));
 
-  const findings = sortFindings(await collectFindings(evidenceDir));
+  const findings = sortFindings(preCollected || await collectFindings(evidenceDir));
 
   const confirmed = findings.filter(f => (f.classification || f.status) === 'CONFIRMED');
   const likely = findings.filter(f => (f.classification || f.status) === 'LIKELY');
@@ -608,20 +610,25 @@ function escapeHtml(text) {
  *
  * @param {string} evidenceDir - Path to evidence directory
  * @param {string} outputPath - Output JSON file path
+ * @param {Array} [preCollected] - Pre-collected findings to avoid re-reading disk
  * @returns {Promise<object>} Summary object
  */
-export async function generateDeveloperSummary(evidenceDir, outputPath) {
+export async function generateDeveloperSummary(evidenceDir, outputPath, preCollected = null) {
   console.log(chalk.blue('\n📊 Developer Summary:'));
 
   // Read summary file
   let findings = [];
-  const summaryPath = path.join(path.dirname(evidenceDir), 'findings_summary.json');
-  try {
-    findings = await fs.readJSON(summaryPath);
-  } catch (e) {
-    // Build from evidence files
-    const collected = await collectFindings(evidenceDir);
-    findings = collected;
+  if (preCollected) {
+    findings = preCollected;
+  } else {
+    const summaryPath = path.join(path.dirname(evidenceDir), 'findings_summary.json');
+    try {
+      findings = await fs.readJSON(summaryPath);
+    } catch (e) {
+      // Build from evidence files
+      const collected = await collectFindings(evidenceDir);
+      findings = collected;
+    }
   }
 
   // Group by classification
@@ -709,4 +716,30 @@ export async function generateDeveloperSummary(evidenceDir, outputPath) {
   console.log(chalk.green(`\n  ✅ Summary saved: ${outputPath}`));
 
   return summary;
+}
+
+// -----------------------------------------------------------------------
+// All-in-one report generation — reads evidence directory once
+// -----------------------------------------------------------------------
+
+/**
+ * Generate all reports (SARIF, HTML, Developer Summary) in one pass.
+ * Collects evidence files once from disk and passes them to each generator,
+ * avoiding redundant I/O.
+ *
+ * @param {string} evidenceDir - Path to evidence directory
+ * @param {string} outputDir - Output directory for all report files
+ * @param {object} [metadata] - Optional metadata (targetUrl, version)
+ * @returns {Promise<{sarif: object, html: string, summary: object}>}
+ */
+export async function generateAllReports(evidenceDir, outputDir, metadata = {}) {
+  const findings = await collectFindings(evidenceDir);
+
+  const [sarif, html, summary] = await Promise.all([
+    generateSarifReport(evidenceDir, path.join(outputDir, 'report.sarif.json'), metadata, findings),
+    generateHtmlReport(evidenceDir, path.join(outputDir, 'report.html'), metadata, findings),
+    generateDeveloperSummary(evidenceDir, path.join(outputDir, 'developer_summary.json'), findings)
+  ]);
+
+  return { sarif, html, summary };
 }

@@ -20,6 +20,25 @@ const CONFIG_DIR = path.join(homedir(), '.config', 'dynamictester');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
 
 /**
+ * Simple promise-based mutex to serialize read-modify-write cycles.
+ * Prevents concurrent config mutations from clobbering each other.
+ * @type {Promise<void>}
+ */
+let _configMutex = Promise.resolve();
+
+/**
+ * Run an async function while holding the config mutex.
+ * @param {function(): Promise<*>} fn
+ * @returns {Promise<*>}
+ */
+function withConfigLock(fn) {
+  const prev = _configMutex;
+  let release;
+  _configMutex = new Promise((resolve) => { release = resolve; });
+  return prev.then(fn).finally(release);
+}
+
+/**
  * Default config structure for a fresh installation.
  * @returns {object}
  */
@@ -56,13 +75,17 @@ export async function loadConfig() {
 }
 
 /**
- * Save the config to disk.
+ * Save the config to disk with restricted permissions (owner-only read/write).
  * @param {object} config - The full configuration object
  * @returns {Promise<void>}
  */
 export async function saveConfig(config) {
   await fs.ensureDir(CONFIG_DIR);
   await fs.writeJSON(CONFIG_PATH, config, { spaces: 2 });
+  // Restrict permissions to owner-only (0o600) to protect API keys
+  try {
+    await fs.chmod(CONFIG_PATH, 0o600);
+  } catch (e) { /* chmod may not be supported on all platforms (e.g. Windows) */ }
 }
 
 /**
@@ -82,9 +105,15 @@ export async function getProviderConfig(name) {
  * @returns {Promise<void>}
  */
 export async function setProviderConfig(name, providerConfig) {
-  const config = await loadConfig();
-  config.providers[name] = { ...providerConfig, configured: true };
-  await saveConfig(config);
+  // Validate name to prevent prototype pollution
+  if (!name || typeof name !== 'string' || name === '__proto__' || name === 'constructor' || name === 'prototype') {
+    throw new Error(`Invalid provider name: ${name}`);
+  }
+  return withConfigLock(async () => {
+    const config = await loadConfig();
+    config.providers[name] = { ...providerConfig, configured: true };
+    await saveConfig(config);
+  });
 }
 
 /**
@@ -93,9 +122,15 @@ export async function setProviderConfig(name, providerConfig) {
  * @returns {Promise<void>}
  */
 export async function clearProviderConfig(name) {
-  const config = await loadConfig();
-  delete config.providers[name];
-  await saveConfig(config);
+  // Validate name to prevent prototype pollution
+  if (!name || typeof name !== 'string' || name === '__proto__' || name === 'constructor' || name === 'prototype') {
+    throw new Error(`Invalid provider name: ${name}`);
+  }
+  return withConfigLock(async () => {
+    const config = await loadConfig();
+    delete config.providers[name];
+    await saveConfig(config);
+  });
 }
 
 /**
@@ -105,10 +140,12 @@ export async function clearProviderConfig(name) {
  * @returns {Promise<void>}
  */
 export async function setDefaults(provider, model) {
-  const config = await loadConfig();
-  config.defaultProvider = provider;
-  config.defaultModel = model;
-  await saveConfig(config);
+  return withConfigLock(async () => {
+    const config = await loadConfig();
+    config.defaultProvider = provider;
+    config.defaultModel = model;
+    await saveConfig(config);
+  });
 }
 
 /**

@@ -366,11 +366,14 @@ export class StagehandManager {
 
       if (schema) {
         // Structured extraction with Zod schema — returns typed data
+        // V3 signature: extract(instruction, schema, options?)
         result = await this.stagehand.extract(instruction, schema, options);
       } else {
         // Free-form extraction — returns { extraction: string }
-        const hasOptions = Object.keys(options).length > 0;
-        result = await this.stagehand.extract(instruction, hasOptions ? options : undefined);
+        // V3 signature: extract(instruction) — no options overload for free-form.
+        // Selector is not supported without a schema; ignore it to avoid passing
+        // the options object in the schema position.
+        result = await this.stagehand.extract(instruction);
       }
 
       return {

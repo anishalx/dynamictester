@@ -6,6 +6,23 @@
 
 export class ResponseAnalyzer {
   /**
+   * Safely extract body text from a response object.
+   * Handles null, undefined, string, and object bodies.
+   * @param {object} response - HTTP response object
+   * @returns {string} Body text (empty string if unavailable)
+   * @private
+   */
+  static _getBodyText(response) {
+    if (!response?.body && response?.body !== '') return '';
+    if (typeof response.body === 'string') return response.body;
+    try {
+      return JSON.stringify(response.body);
+    } catch {
+      return String(response.body);
+    }
+  }
+
+  /**
    * Detect database-specific error messages in response.
    * Covers MySQL, PostgreSQL, MSSQL, Oracle, SQLite, MongoDB, CouchDB, and Cassandra.
    *
@@ -40,7 +57,7 @@ export class ResponseAnalyzer {
         /odbc sql server driver/i,
         /unclosed quotation mark/i,
         /\[sql server\]/i,
-        /line \d+:/i,
+        /\[sql server\].*line \d+/i,
         /incorrect syntax near/i,
         /SqlException/i,
         /nvarchar.*value/i
@@ -81,9 +98,7 @@ export class ResponseAnalyzer {
       ]
     };
 
-    const bodyText = typeof response.body === 'string' 
-      ? response.body 
-      : JSON.stringify(response.body);
+    const bodyText = this._getBodyText(response);
 
     for (const [db, patterns] of Object.entries(errorPatterns)) {
       for (const pattern of patterns) {
@@ -164,14 +179,14 @@ export class ResponseAnalyzer {
 
     return {
       confirmed,
-      actualDelay: actualDelay.toFixed(2),
+      actualDelay: parseFloat(actualDelay.toFixed(2)),
       expectedDelay,
-      tolerance: tolerance.toFixed(2),
+      tolerance: parseFloat(tolerance.toFixed(2)),
       confidence,
       details: {
-        normalTime: normalTime.toFixed(2),
-        delayedTime: delayedTime.toFixed(2),
-        difference: actualDelay.toFixed(2)
+        normalTime: parseFloat(normalTime.toFixed(2)),
+        delayedTime: parseFloat(delayedTime.toFixed(2)),
+        difference: parseFloat(actualDelay.toFixed(2))
       }
     };
   }
@@ -190,9 +205,7 @@ export class ResponseAnalyzer {
    * @returns {boolean} True if validation error detected
    */
   static isValidationError(response) {
-    const bodyText = typeof response.body === 'string'
-      ? response.body
-      : JSON.stringify(response.body);
+    const bodyText = this._getBodyText(response);
 
     const validationPatterns = [
       /invalid input/i,
@@ -234,9 +247,7 @@ export class ResponseAnalyzer {
    * @returns {object} WAF detection result
    */
   static detectWAFBlocking(response) {
-    const bodyText = typeof response.body === 'string'
-      ? response.body
-      : JSON.stringify(response.body);
+    const bodyText = this._getBodyText(response);
 
     const headerText = response.headers
       ? (typeof response.headers === 'string'
@@ -301,9 +312,7 @@ export class ResponseAnalyzer {
    * @returns {object} SSRF detection result
    */
   static detectSSRFIndicators(response) {
-    const bodyText = typeof response.body === 'string'
-      ? response.body
-      : JSON.stringify(response.body);
+    const bodyText = this._getBodyText(response);
 
     const ssrfPatterns = {
       awsMetadata: [
@@ -358,9 +367,7 @@ export class ResponseAnalyzer {
    * @returns {object} XXE detection result
    */
   static detectXXEIndicators(response) {
-    const bodyText = typeof response.body === 'string'
-      ? response.body
-      : JSON.stringify(response.body);
+    const bodyText = this._getBodyText(response);
 
     const xxePatterns = [
       /root:.*:0:0/i,                     // /etc/passwd
@@ -394,9 +401,7 @@ export class ResponseAnalyzer {
    * @returns {object} XSS detection result
    */
   static detectXSSReflection(response, payload) {
-    const bodyText = typeof response.body === 'string'
-      ? response.body
-      : JSON.stringify(response.body);
+    const bodyText = this._getBodyText(response);
 
     // Check if the exact payload is reflected unescaped
     if (payload && bodyText.includes(payload)) {
@@ -440,9 +445,7 @@ export class ResponseAnalyzer {
    * @returns {Array} Extracted data
    */
   static extractData(response, expectedPattern) {
-    const bodyText = typeof response.body === 'string'
-      ? response.body
-      : JSON.stringify(response.body);
+    const bodyText = this._getBodyText(response);
 
     const data = [];
     
@@ -464,10 +467,18 @@ export class ResponseAnalyzer {
 
     // Pattern-based extraction
     if (expectedPattern) {
-      const regex = new RegExp(expectedPattern, 'gi');
-      const matches = bodyText.matchAll(regex);
-      for (const match of matches) {
-        data.push(match[1] || match[0]);
+      try {
+        const regex = new RegExp(expectedPattern, 'gi');
+        const matches = bodyText.matchAll(regex);
+        for (const match of matches) {
+          data.push(match[1] || match[0]);
+        }
+      } catch (e) {
+        // Invalid regex pattern — fall back to literal string search
+        const idx = bodyText.indexOf(expectedPattern);
+        if (idx !== -1) {
+          data.push(bodyText.substring(idx, idx + expectedPattern.length + 100));
+        }
       }
     }
 

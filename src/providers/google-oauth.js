@@ -1,7 +1,7 @@
 import { createServer } from 'http';
 import { URL } from 'url';
 import { randomBytes, createHash, randomUUID } from 'crypto';
-import { platform, arch } from 'os';
+import { platform } from 'os';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 
@@ -14,9 +14,11 @@ const CLIENT_ID = '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleuse
 /**
  * Antigravity OAuth client secret.
  * Required for token exchange and refresh. Shared by opencode-compatible tools.
+ * Loaded from GOOGLE_OAUTH_CLIENT_SECRET env var, with hardcoded fallback for
+ * installed-app flows (Google considers these non-confidential).
  * @type {string}
  */
-const CLIENT_SECRET = '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';
+const CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET || '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';
 
 /**
  * Local callback port for OAuth redirect.
@@ -67,17 +69,6 @@ const PRODUCTION_BASE_URL = 'https://cloudcode-pa.googleapis.com';
  * @type {string[]}
  */
 const ANTIGRAVITY_VERSIONS = ['1.15.8', '1.16.5', '1.16.0'];
-
-/**
- * Build a randomized User-Agent string matching the opencode plugin pattern.
- * @returns {string}
- */
-function buildDiscoveryUserAgent() {
-  const version = ANTIGRAVITY_VERSIONS[Math.floor(Math.random() * ANTIGRAVITY_VERSIONS.length)];
-  const fakePlatform = Math.random() < 0.5 ? 'darwin' : 'win32';
-  const fakeArch = Math.random() < 0.5 ? 'x64' : 'arm64';
-  return `antigravity/${version} ${fakePlatform}/${fakeArch}`;
-}
 
 /**
  * Scopes required for Antigravity access.
@@ -282,8 +273,8 @@ async function promptManualPaste(expectedState) {
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
 
-  if (state && state !== expectedState) {
-    throw new Error('OAuth state mismatch from pasted URL — possible session confusion');
+  if (!state || state !== expectedState) {
+    throw new Error('OAuth state mismatch or missing from pasted URL — possible CSRF attack');
   }
 
   return code;
@@ -302,16 +293,24 @@ async function promptManualPaste(expectedState) {
  */
 async function waitForCallbackWithFallback(state) {
   // Start the local callback server
+  let serverCloseRef = null;
+
   const callbackPromise = waitForCallback(state).then((result) => {
+    serverCloseRef = result.closeServer;
     return { source: 'server', code: result.code, closeServer: result.closeServer };
   });
+
+  // Capture server close ref from the promise's internal server via a side-channel:
+  // waitForCallback will either resolve (setting serverCloseRef) or reject/timeout.
+  // We also extract the closeServer when the callbackPromise settles.
+  let raceSettled = false;
 
   // After a delay, offer the paste fallback
   const pastePromise = (async () => {
     await sleep(PASTE_FALLBACK_DELAY_MS);
 
     // Loop: keep asking until user provides a code or callback server resolves
-    while (true) {
+    while (!raceSettled) {
       const code = await promptManualPaste(state);
       if (code) {
         return { source: 'paste', code, closeServer: null };
@@ -324,12 +323,16 @@ async function waitForCallbackWithFallback(state) {
 
   // Race: whichever resolves first wins
   const result = await Promise.race([callbackPromise, pastePromise]);
+  raceSettled = true;
 
   // Clean up the callback server if paste won
   if (result.source === 'paste') {
-    // The server promise is still pending — it will time out eventually.
-    // We cannot easily kill it from here since waitForCallback returns a
-    // promise, but the 120s timeout will clean it up.
+    // Try to close the server that's still listening
+    if (serverCloseRef) {
+      serverCloseRef();
+    }
+    // Suppress the unhandled rejection when the server times out
+    callbackPromise.catch(() => { /* Server will time out and reject — safe to ignore */ });
   } else if (result.closeServer) {
     result.closeServer();
   }
@@ -411,7 +414,7 @@ export async function refreshAccessToken(refreshToken) {
  * @returns {Promise<string>} The project ID (never null — always returns a value)
  */
 export async function discoverProjectId(accessToken) {
-  const discoveryPlatform = platform() === 'win32' ? 'WINDOWS' : 'MACOS';
+  const discoveryPlatform = platform() === 'win32' ? 'WINDOWS' : (platform() === 'darwin' ? 'MACOS' : platform().toUpperCase());
   const headers = {
     'Authorization': `Bearer ${accessToken}`,
     'Content-Type': 'application/json',
@@ -424,7 +427,7 @@ export async function discoverProjectId(accessToken) {
   const onboardBody = JSON.stringify({
     metadata: {
       ideType: 'IDE_UNSPECIFIED',
-      platform: platform().toUpperCase() === 'DARWIN' ? 'MACOS' : platform().toUpperCase(),
+      platform: discoveryPlatform,
       pluginType: 'GEMINI'
     }
   });
@@ -493,13 +496,13 @@ export async function runAntigravityOAuthFlow() {
   console.log(chalk.gray(`\nWaiting for callback on ${REDIRECT_URI} ...`));
   console.log(chalk.gray('(If the callback does not arrive automatically, you will be prompted to paste the URL.)'));
 
-  // Try to auto-open the URL
+  // Try to auto-open the URL (using execFile to avoid shell injection)
   try {
-    const { exec } = await import('child_process');
+    const { execFile } = await import('child_process');
     const cmd = process.platform === 'darwin' ? 'open'
       : process.platform === 'win32' ? 'start'
       : 'xdg-open';
-    exec(`${cmd} "${authUrl}"`);
+    execFile(cmd, [authUrl], (err) => { /* best-effort — user can open manually */ });
   } catch (e) { /* User can open manually */ }
 
   // Wait for callback with paste fallback
@@ -509,7 +512,10 @@ export async function runAntigravityOAuthFlow() {
   console.log(chalk.gray('Exchanging code for tokens...'));
   const tokens = await exchangeCodeForTokens(code, codeVerifier);
 
-  const expiresAt = Date.now() + (tokens.expires_in * 1000);
+  const expiresInMs = (typeof tokens.expires_in === 'number' && !isNaN(tokens.expires_in))
+    ? tokens.expires_in * 1000
+    : 3600 * 1000; // Default to 1 hour if expires_in is missing/invalid
+  const expiresAt = Date.now() + expiresInMs;
 
   // Discover project ID (best-effort — always returns a value)
   console.log(chalk.gray('Discovering project ID...'));
@@ -539,10 +545,13 @@ export async function ensureFreshToken(tokenData) {
 
   console.log(chalk.gray('Refreshing access token...'));
   const refreshed = await refreshAccessToken(tokenData.refreshToken);
+  const refreshExpiresMs = (typeof refreshed.expires_in === 'number' && !isNaN(refreshed.expires_in))
+    ? refreshed.expires_in * 1000
+    : 3600 * 1000;
   return {
     ...tokenData,
     accessToken: refreshed.access_token,
-    expiresAt: Date.now() + (refreshed.expires_in * 1000)
+    expiresAt: Date.now() + refreshExpiresMs
   };
 }
 

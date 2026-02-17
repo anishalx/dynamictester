@@ -1,4 +1,5 @@
 import { BaseParser } from '../parser-interface.js';
+import { generateVulnerabilityId } from '../normalizer.js';
 
 /**
  * Parser for Gitleaks secret scanner output
@@ -31,23 +32,24 @@ export class GitleaksParser extends BaseParser {
 
     for (const finding of findings) {
       const secretType = this.mapSecretType(finding.RuleID || finding.Description);
+      const location = {
+          file: finding.File ?? 'unknown',
+          line: finding.StartLine ?? 0,
+          column: finding.StartColumn ?? 0,
+          endLine: finding.EndLine ?? finding.StartLine ?? 0,
+          endColumn: finding.EndColumn ?? finding.StartColumn ?? 0,
+          snippet: finding.Secret ? `[REDACTED - ${finding.Secret.length} chars]` : ''
+        };
       
       vulnerabilities.push({
-        id: `GITLEAKS-${finding.Fingerprint || finding.RuleID}-${finding.StartLine}`,
+        id: generateVulnerabilityId('gitleaks', finding.RuleID, location),
         source: 'gitleaks',
         sourceVersion: this.analyzerVersion,
         type: 'secrets',
         subType: secretType,
         severity: 'HIGH', // Secrets are always high severity
         confidence: 'HIGH',
-        location: {
-          file: finding.File ?? 'unknown',
-          line: finding.StartLine ?? 0,
-          column: finding.StartColumn ?? 0,
-          endLine: finding.EndLine ?? finding.StartLine ?? 0,
-          endColumn: finding.EndColumn ?? finding.StartColumn ?? 0,
-          snippet: finding.Secret ? `${finding.Secret.substring(0, Math.min(20, finding.Secret.length))}${finding.Secret.length > 20 ? '...' : ''}` : ''
-        },
+        location,
         description: finding.Description || `Secret detected: ${finding.RuleID}`,
         remediation: 'Remove hardcoded secret and use environment variables or secret management system',
         cwe: ['CWE-798'],

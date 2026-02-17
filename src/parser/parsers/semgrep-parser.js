@@ -1,5 +1,5 @@
 import { BaseParser } from '../parser-interface.js';
-import { normalizeSeverity, normalizeConfidence, categorizeVulnerability } from '../normalizer.js';
+import { normalizeSeverity, normalizeConfidence, categorizeVulnerability, generateVulnerabilityId } from '../normalizer.js';
 
 /**
  * Parser for Semgrep static analyzer output
@@ -32,22 +32,24 @@ export class SemgrepParser extends BaseParser {
         metadata: finding.extra?.metadata
       });
 
-      vulnerabilities.push({
-        id: finding.check_id || `SEMGREP-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-        source: 'semgrep',
-        sourceVersion: this.analyzerVersion,
-        type,
-        subType,
-        severity: normalizeSeverity(finding.extra?.severity || 'ERROR'),
-        confidence: normalizeConfidence(finding.extra?.metadata?.confidence || 'MEDIUM'),
-        location: {
+      const location = {
           file: finding.path || 'unknown',
           line: finding.start?.line || 0,
           column: finding.start?.col || 0,
           endLine: finding.end?.line || 0,
           endColumn: finding.end?.col || 0,
           snippet: finding.extra?.lines || ''
-        },
+        };
+
+      vulnerabilities.push({
+        id: generateVulnerabilityId('semgrep', finding.check_id, location),
+        source: 'semgrep',
+        sourceVersion: this.analyzerVersion,
+        type,
+        subType,
+        severity: normalizeSeverity(finding.extra?.severity || 'ERROR'),
+        confidence: normalizeConfidence(finding.extra?.metadata?.confidence || 'MEDIUM'),
+        location,
         description: finding.extra?.message || '',
         remediation: finding.extra?.metadata?.fix || '',
         cwe: finding.extra?.metadata?.cwe || [],

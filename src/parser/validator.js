@@ -84,6 +84,7 @@ export function validateVulnerabilities(vulnerabilities) {
 
 /**
  * Check for duplicate vulnerability IDs
+ * @deprecated Not imported anywhere — dedup is handled in result-parser.js via Set.
  * @param {object[]} vulnerabilities - Array of vulnerabilities
  * @returns {{hasDuplicates: boolean, duplicates: object[]}}
  */

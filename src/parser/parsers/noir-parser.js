@@ -1,5 +1,5 @@
 import { BaseParser } from '../parser-interface.js';
-import { normalizeSeverity, normalizeConfidence, categorizeVulnerability } from '../normalizer.js';
+import { normalizeSeverity, normalizeConfidence, categorizeVulnerability, generateVulnerabilityId } from '../normalizer.js';
 
 /**
  * Parser for OWASP Noir API security scanner output
@@ -40,22 +40,24 @@ export class NoirParser extends BaseParser {
           // Extract CWE from vulnerability metadata if available
           const extractedCwe = this.extractCWE(vuln.cwe || vuln.tags || []);
 
-          vulnerabilities.push({
-            id: vuln.id || `NOIR-${method}-${url}-${Date.now()}`,
-            source: 'noir',
-            sourceVersion: this.analyzerVersion,
-            type,
-            subType,
-            severity: normalizeSeverity(vuln.severity || 'MEDIUM'),
-            confidence: normalizeConfidence(vuln.confidence || 'MEDIUM'),
-            location: {
+          const vulnLocation = {
               file: endpoint.file ?? 'api',
               line: endpoint.line ?? 0,
               column: endpoint.column ?? 0,
               endLine: endpoint.endLine ?? endpoint.line ?? 0,
               endColumn: endpoint.endColumn ?? 0,
               snippet: `${method} ${url}`
-            },
+            };
+
+          vulnerabilities.push({
+            id: generateVulnerabilityId('noir', vuln.id, vulnLocation),
+            source: 'noir',
+            sourceVersion: this.analyzerVersion,
+            type,
+            subType,
+            severity: normalizeSeverity(vuln.severity || 'MEDIUM'),
+            confidence: normalizeConfidence(vuln.confidence || 'MEDIUM'),
+            location: vulnLocation,
             description: vuln.message || vuln.type || '',
             remediation: vuln.remediation || '',
             cwe: extractedCwe,
@@ -76,22 +78,24 @@ export class NoirParser extends BaseParser {
 
       // Check for missing security headers
       if (endpoint.missingHeaders && endpoint.missingHeaders.length > 0) {
-        vulnerabilities.push({
-          id: `NOIR-HEADERS-${method}-${url}`,
-          source: 'noir',
-          sourceVersion: this.analyzerVersion,
-          type: 'config',
-          subType: 'MissingSecurityHeaders',
-          severity: 'LOW',
-          confidence: 'HIGH',
-          location: {
+        const headerLocation = {
             file: endpoint.file || 'api',
             line: endpoint.line || 0,
             column: 0,
             endLine: 0,
             endColumn: 0,
             snippet: `${method} ${url}`
-          },
+          };
+
+        vulnerabilities.push({
+          id: generateVulnerabilityId('noir', 'missing-security-headers', headerLocation),
+          source: 'noir',
+          sourceVersion: this.analyzerVersion,
+          type: 'config',
+          subType: 'MissingSecurityHeaders',
+          severity: 'LOW',
+          confidence: 'HIGH',
+          location: headerLocation,
           description: `Missing security headers: ${endpoint.missingHeaders.join(', ')}`,
           remediation: 'Add security headers to the response',
           cwe: [],

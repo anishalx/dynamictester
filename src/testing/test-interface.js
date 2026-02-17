@@ -77,14 +77,18 @@ export class VulnerabilityTester {
   }
 
   /**
-   * Classify result based on evidence
+   * Classify result based on evidence.
+   * Uses the same vocabulary as VulnerabilityClassifier:
+   *   CONFIRMED, LIKELY, BLOCKED, NOT_REPRODUCIBLE
+   *
    * @param {object} evidence - Test evidence
-   * @returns {string} Classification: EXPLOITED, POTENTIAL, FALSE_POSITIVE
+   * @returns {string} Classification
    */
   classify(evidence) {
-    if (evidence.level >= 3) return 'EXPLOITED';
-    if (evidence.externalBlocker) return 'POTENTIAL';
-    return 'FALSE_POSITIVE';
+    if (evidence.level >= 3) return 'CONFIRMED';
+    if (evidence.externalBlocker) return 'BLOCKED';
+    if (evidence.level >= 1) return 'LIKELY';
+    return 'NOT_REPRODUCIBLE';
   }
 
   /**
@@ -93,18 +97,19 @@ export class VulnerabilityTester {
    * @returns {object} Formatted report
    */
   generateReport(result) {
-    const classification = this.classify(result.evidence);
+    const evidence = result.evidence || {};
+    const classification = this.classify(evidence);
     
     return {
       id: result.id,
       type: this.vulnerabilityType,
       classification,
-      level: result.evidence.level || 0,
-      confidence: result.evidence.confidence || 'UNKNOWN',
+      level: evidence.level || 0,
+      confidence: evidence.confidence || 'UNKNOWN',
       totalAttempts: result.attempts?.length || 0,
       bypassAttempts: result.bypassAttempts || 0,
-      evidence: result.evidence,
-      includeInReport: classification !== 'FALSE_POSITIVE'
+      evidence,
+      includeInReport: classification !== 'NOT_REPRODUCIBLE'
     };
   }
 }

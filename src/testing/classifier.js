@@ -148,7 +148,7 @@ export class VulnerabilityClassifier {
       levelName: levelDetails.name,
       confidence: 'N/A',
       reason: 'No evidence of exploitability after exhaustive testing',
-      attemptsExhausted: testResult.bypassAttempts || 0,
+      attemptsExhausted: testResult.bypassAttempts ?? 0,
       totalAttempts: testResult.attempts?.length || 0,
       evidence: testResult.evidence,
       includeInReport: false,

@@ -54,7 +54,7 @@ export function categorizeVulnerability(vuln) {
   // -------------------------------------------------------------------
   // Secrets / Hardcoded credentials (check first — very distinct)
   // -------------------------------------------------------------------
-  if (/secret|password|api[_-]?key|token|credential|private[_-]?key|cwe-798|cwe-259|cwe-321/.test(indicators)) {
+  if (/\bsecret\b|password|api[_-]?key|hardcoded.*token|token.*leak|expose.*token|credential|private[_-]?key|cwe-798|cwe-259|cwe-321/.test(indicators)) {
     if (/password/.test(indicators)) return { type: 'secrets', subType: 'HardcodedPassword', owasp: ['A02:2021'] };
     if (/api[_-]?key/.test(indicators)) return { type: 'secrets', subType: 'ExposedAPIKey', owasp: ['A02:2021'] };
     if (/private[_-]?key/.test(indicators)) return { type: 'secrets', subType: 'ExposedPrivateKey', owasp: ['A02:2021'] };
@@ -97,7 +97,7 @@ export function categorizeVulnerability(vuln) {
   // -------------------------------------------------------------------
   if (/xss|cross.*site.*script|cwe-79/.test(indicators)) {
     if (/stored|persistent/.test(indicators)) return { type: 'xss', subType: 'StoredXSS', owasp: ['A03:2021'] };
-    if (/dom/.test(indicators)) return { type: 'xss', subType: 'DOMXSS', owasp: ['A03:2021'] };
+    if (/dom[_-]?(xss|based)|dom[_-]?manipulation|\bdom\b/.test(indicators)) return { type: 'xss', subType: 'DOMXSS', owasp: ['A03:2021'] };
     return { type: 'xss', subType: 'ReflectedXSS', owasp: ['A03:2021'] };
   }
 
@@ -163,7 +163,7 @@ export function categorizeVulnerability(vuln) {
   // -------------------------------------------------------------------
   // Authentication issues
   // -------------------------------------------------------------------
-  if (/auth(?!oriz)|broken.*auth|cwe-287|cwe-306|cwe-522|session.*fixat|cwe-384/.test(indicators)) {
+  if (/\bauthenticat(?:e|ion|ed)\b|broken.*auth|cwe-287|cwe-306|cwe-522|session.*fixat|cwe-384/.test(indicators)) {
     if (/session.*fixat|cwe-384/.test(indicators)) {
       return { type: 'auth', subType: 'SessionFixation', owasp: ['A07:2021'] };
     }
@@ -190,14 +190,14 @@ export function categorizeVulnerability(vuln) {
   // -------------------------------------------------------------------
   // Cryptography
   // -------------------------------------------------------------------
-  if (/crypto|encrypt|hash|cwe-327|cwe-326|cwe-328|weak.*algorithm|md5|sha1(?!.)|des(?!cri)|rc4/.test(indicators)) {
+  if (/crypto|encrypt|\bhash\b|cwe-327|cwe-326|cwe-328|weak.*algorithm|\bmd5\b|\bsha-?1\b|\b3?des\b|\brc4\b/.test(indicators)) {
     return { type: 'crypto', subType: 'WeakCrypto', owasp: ['A02:2021'] };
   }
 
   // -------------------------------------------------------------------
   // Dependency / Supply-chain
   // -------------------------------------------------------------------
-  if (/cve-|vulnerable.*depend|outdated.*package|known.*vulnerab/.test(indicators)) {
+  if (/\bcve-\d{4}-\d+\b|vulnerable.*depend|outdated.*package|known.*vulnerab/.test(indicators)) {
     return { type: 'dependency', subType: 'VulnerableDependency', owasp: ['A06:2021'] };
   }
 
@@ -215,13 +215,15 @@ export function categorizeVulnerability(vuln) {
  * @returns {string} Deterministic vulnerability ID
  */
 export function generateVulnerabilityId(source, checkId, location) {
-  const file = location.file || 'unknown';
-  const line = location.line || 0;
-  const col = location.column || 0;
+  const loc = location || {};
+  const normalizedSource = (source || 'unknown').toUpperCase();
+  const file = loc.file || 'unknown';
+  const line = loc.line || 0;
+  const col = loc.column || 0;
 
   // Build a canonical key from the four identity components
   const canonical = [
-    (source || 'unknown').toUpperCase(),
+    normalizedSource,
     (checkId || 'UNKNOWN'),
     file,
     String(line),
@@ -231,5 +233,5 @@ export function generateVulnerabilityId(source, checkId, location) {
   const hash = createHash('sha256').update(canonical).digest('hex').substring(0, 12);
   const fileShort = file.split('/').pop();
 
-  return `${source.toUpperCase()}-${checkId || 'UNKNOWN'}-${fileShort}-${line}-${hash}`;
+  return `${normalizedSource}-${checkId || 'UNKNOWN'}-${fileShort}-${line}-${hash}`;
 }

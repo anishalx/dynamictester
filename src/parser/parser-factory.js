@@ -99,6 +99,7 @@ export function getSupportedAnalyzers() {
 
 /**
  * Check if an analyzer type is supported
+ * @deprecated Not imported anywhere — use createParser() which throws for unknown types.
  * @param {string} analyzerType - Type to check
  * @returns {boolean} True if supported
  */

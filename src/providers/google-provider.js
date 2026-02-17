@@ -5,7 +5,6 @@ import { BaseProvider } from './provider-interface.js';
 import { getProviderConfig, setProviderConfig } from '../config/config-manager.js';
 import {
   runAntigravityOAuthFlow,
-  refreshAccessToken,
   ensureFreshToken
 } from './google-oauth.js';
 import { AntigravityClient } from './antigravity-client.js';
@@ -70,12 +69,24 @@ export class GoogleProvider extends BaseProvider {
 
   /**
    * Return models based on the current auth mode.
-   * Antigravity mode shows both Gemini and Antigravity-exclusive models.
-   * API key mode shows only standard Gemini models.
+   * Returns the full combined list (safe superset) synchronously to match
+   * the BaseProvider interface contract. Use getModelsForConfig() if you
+   * need config-aware filtering.
    *
    * @returns {import('./provider-interface.js').ModelInfo[]}
    */
-  async getModels() {
+  getModels() {
+    return [...this._getAntigravityModels(), ...this._getGeminiModels()];
+  }
+
+  /**
+   * Return models filtered by the current auth mode (async — reads config).
+   * Antigravity mode shows both Gemini and Antigravity-exclusive models.
+   * API key mode shows only standard Gemini models.
+   *
+   * @returns {Promise<import('./provider-interface.js').ModelInfo[]>}
+   */
+  async getModelsForConfig() {
     const config = await getProviderConfig('google');
     if (config?.authMode === 'antigravity') {
       return [...this._getAntigravityModels(), ...this._getGeminiModels()];
@@ -84,21 +95,12 @@ export class GoogleProvider extends BaseProvider {
   }
 
   /**
-   * Synchronous model list for contexts where async is not available.
-   * Returns the full combined list (safe superset).
-   * @returns {import('./provider-interface.js').ModelInfo[]}
-   */
-  getModelsSync() {
-    return [...this._getAntigravityModels(), ...this._getGeminiModels()];
-  }
-
-  /**
    * Check if a model ID is valid for this provider.
    * @param {string} modelId
    * @returns {boolean}
    */
   isValidModel(modelId) {
-    const allModels = this.getModelsSync();
+    const allModels = this.getModels();
     return allModels.some(m => m.id === modelId);
   }
 

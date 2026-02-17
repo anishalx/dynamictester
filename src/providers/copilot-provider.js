@@ -44,6 +44,12 @@ const MAX_POLL_DURATION_MS = 300000; // 5 minutes
  * The Copilot proxy is fully OpenAI-compatible, so no format translation is needed.
  */
 export class CopilotProvider extends BaseProvider {
+  constructor() {
+    super();
+    /** @type {import('./provider-interface.js').ModelInfo[]|null} */
+    this._dynamicModels = null;
+  }
+
   get name() {
     return 'copilot';
   }
@@ -195,9 +201,12 @@ export class CopilotProvider extends BaseProvider {
         deviceCode.interval || 5
       );
 
-      // Step 4: Save token
+      // Step 4: Save token with type and expiry tracking
+      const expiresIn = Number(token.expires_in) || 28800; // Default 8 hours
       await setProviderConfig('copilot', {
-        token: token.access_token
+        token: token.access_token,
+        tokenType: token.token_type || 'bearer',
+        expiresAt: Date.now() + (expiresIn * 1000)
       });
 
       console.log(chalk.green('\nGitHub Copilot authenticated successfully.'));
@@ -210,7 +219,14 @@ export class CopilotProvider extends BaseProvider {
 
   async validateAuth() {
     const config = await getProviderConfig('copilot');
-    if (config?.token) return true;
+    if (config?.token) {
+      // Check if token has expired (with 5-minute grace period)
+      if (config.expiresAt && Date.now() > config.expiresAt - 300000) {
+        console.log(chalk.yellow('Copilot token has expired. Please re-authenticate.'));
+        return false;
+      }
+      return true;
+    }
     // Also check env var fallback
     if (process.env.GITHUB_COPILOT_TOKEN) return true;
     return false;

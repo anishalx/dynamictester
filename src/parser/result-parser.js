@@ -21,19 +21,21 @@ export async function parseStaticAnalysisResults(resultPath) {
 
   console.log(chalk.blue(`\n📊 Processing ${paths.length} analyzer result file(s)...\n`));
 
-  for (const path of paths) {
-    console.log(chalk.blue(`📄 Processing: ${path}`));
+  const existingIds = new Set();
+
+  for (const filePath of paths) {
+    console.log(chalk.blue(`📄 Processing: ${filePath}`));
     
     try {
-      const content = await fs.readFile(path, 'utf8');
+      const content = await fs.readFile(filePath, 'utf8');
       const data = JSON.parse(content);
       
       // Auto-detect analyzer type
       const analyzerType = detectAnalyzerType(data);
       if (!analyzerType) {
-        const error = `Could not detect analyzer type for ${path}`;
+        const error = `Could not detect analyzer type for ${filePath}`;
         console.log(chalk.yellow(`⚠️  ${error}, skipping...`));
-        summary.errors.push({ file: path, error: 'Unknown analyzer type' });
+        summary.errors.push({ file: filePath, error: 'Unknown analyzer type' });
         continue;
       }
 
@@ -46,14 +48,14 @@ export async function parseStaticAnalysisResults(resultPath) {
         vulnerabilities = await parser.parse(data);
       } catch (parseError) {
         console.error(chalk.red(`   ❌ Parser error: ${parseError.message}`));
-        summary.errors.push({ file: path, error: `Parser error: ${parseError.message}` });
+        summary.errors.push({ file: filePath, error: `Parser error: ${parseError.message}` });
         continue;
       }
 
       // Validate
       const validation = validateVulnerabilities(vulnerabilities);
       if (!validation.valid) {
-        console.log(chalk.yellow(`⚠️  Validation warnings in ${path}:`));
+        console.log(chalk.yellow(`⚠️  Validation warnings in ${filePath}:`));
         validation.errors.slice(0, 5).forEach(err => {
           console.log(chalk.yellow(`   - Index ${err.index}: ${err.errors.join(', ')}`));
         });
@@ -62,9 +64,9 @@ export async function parseStaticAnalysisResults(resultPath) {
         }
       }
 
-      // Deduplicate before adding to results
-      const existingIds = new Set(allVulnerabilities.map(v => v.id));
+      // Deduplicate before adding to results (incremental Set, not rebuilt each file)
       const uniqueVulns = vulnerabilities.filter(v => !existingIds.has(v.id));
+      for (const v of uniqueVulns) existingIds.add(v.id);
       const duplicateCount = vulnerabilities.length - uniqueVulns.length;
       
       if (duplicateCount > 0) {
@@ -79,9 +81,9 @@ export async function parseStaticAnalysisResults(resultPath) {
       console.log(chalk.green(`   ✓ Parsed ${uniqueVulns.length} vulnerabilities\n`));
 
     } catch (error) {
-      const errorMsg = `Failed to parse ${path}: ${error.message}`;
+      const errorMsg = `Failed to parse ${filePath}: ${error.message}`;
       console.error(chalk.red(`❌ ${errorMsg}`));
-      summary.errors.push({ file: path, error: error.message });
+      summary.errors.push({ file: filePath, error: error.message });
     }
   }
 
@@ -117,6 +119,7 @@ export async function parseStaticAnalysisResults(resultPath) {
 
 /**
  * Backward compatibility: Parse a single static analysis result
+ * @deprecated Not imported anywhere — use parseStaticAnalysisResults instead.
  * @param {string} resultJsonPath - Path to a single result file
  * @returns {Promise<Array>} Array of vulnerabilities
  */

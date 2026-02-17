@@ -1,5 +1,5 @@
 import { BaseParser } from '../parser-interface.js';
-import { normalizeSeverity } from '../normalizer.js';
+import { normalizeSeverity, generateVulnerabilityId } from '../normalizer.js';
 
 /**
  * Parser for OSV (Open Source Vulnerabilities) scanner output
@@ -65,7 +65,7 @@ export class OsvParser extends BaseParser {
         if (sev.type === 'CVSS_V3' && typeof sev.baseScore === 'number') {
           // Use explicit base score if provided
           cvssScore = sev.baseScore;
-        } else if (sev.score && !sev.score.startsWith('CVSS:')) {
+        } else if (sev.score && !String(sev.score).startsWith('CVSS:')) {
           // Numeric score provided directly (not a vector string)
           cvssScore = parseFloat(sev.score);
         }
@@ -86,7 +86,11 @@ export class OsvParser extends BaseParser {
       .map(e => e.fixed) || [];
 
     return {
-      id: vuln.id,
+      id: generateVulnerabilityId('osv', vuln.id, {
+        file: source.path || 'package.json',
+        line: 0,
+        column: 0
+      }),
       source: 'osv',
       sourceVersion: this.analyzerVersion,
       type: 'dependency',

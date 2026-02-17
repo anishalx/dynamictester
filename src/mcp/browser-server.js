@@ -3,7 +3,6 @@ import { AuthManager, getAuthManager } from '../auth/auth-manager.js';
 
 const MAX_CONTENT_LENGTH = 15000; // Max chars to return to avoid token limits
 const DEFAULT_TIMEOUT = 5000; // 5 seconds default timeout (reduced from 8s)
-const SHORT_TIMEOUT = 2000; // 2 seconds for quick checks
 
 /**
  * Browser automation tools for the LLM
@@ -26,6 +25,7 @@ export class BrowserManager {
     this.page = options.page || null;
     this._externallyManaged = !!(options.page || options.context);
     this.authManager = getAuthManager();
+    this._initPromise = null; // Guard against concurrent ensureBrowser() calls
   }
 
   async ensureBrowser() {
@@ -33,14 +33,35 @@ export class BrowserManager {
     if (this._externallyManaged && this.page) {
       return;
     }
-    if (!this.browser) {
-      this.browser = await chromium.launch({ headless: true });
-      this.context = await this.browser.newContext({
-        viewport: { width: 1280, height: 720 },
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      });
-      this.page = await this.context.newPage();
+    if (this.browser) return;
+
+    // Prevent concurrent initialization — return the same promise if init is in progress
+    if (this._initPromise) {
+      return this._initPromise;
     }
+
+    this._initPromise = (async () => {
+      try {
+        this.browser = await chromium.launch({ headless: true });
+        this.context = await this.browser.newContext({
+          viewport: { width: 1280, height: 720 },
+          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        });
+        this.page = await this.context.newPage();
+      } catch (err) {
+        // Clean up partial state on failure so next call can retry
+        if (this.browser) {
+          try { await this.browser.close(); } catch (_) { /* best effort */ }
+        }
+        this.browser = null;
+        this.context = null;
+        this.page = null;
+        throw err;
+      } finally {
+        this._initPromise = null;
+      }
+    })();
+    return this._initPromise;
   }
 
   /**
@@ -86,7 +107,7 @@ export class BrowserManager {
             if (el.id) selector = `#${el.id}`;
             else if (el.name) selector = `[name="${el.name}"]`;
             else if (el.placeholder) selector = `[placeholder="${el.placeholder}"]`;
-            else if (el.type && el.className) selector = `${type}[type="${el.type}"].${el.className.split(' ')[0]}`;
+            else if (el.type && el.className && el.className.trim()) selector = `${type}[type="${el.type}"].${el.className.trim().split(' ')[0]}`;
             
             if (selector) {
               interactable.push({
@@ -121,7 +142,7 @@ export class BrowserManager {
   }
 
   async fill({ selector, value }) {
-    if (!this.page) throw new Error('No page open');
+    if (!this.page) return { status: 'error', message: 'No page open. Call browser_navigate first.' };
     
     // First check if element is interactable
     const check = await this.isElementInteractable(selector);
@@ -152,7 +173,7 @@ export class BrowserManager {
   }
 
   async click({ selector }) {
-    if (!this.page) throw new Error('No page open');
+    if (!this.page) return { status: 'error', message: 'No page open. Call browser_navigate first.' };
     
     // First check if element is interactable
     const check = await this.isElementInteractable(selector);
@@ -188,7 +209,7 @@ export class BrowserManager {
    * Get a summarized/truncated response instead of full HTML
    */
   async getResponse({ extract = 'summary' }) {
-    if (!this.page) throw new Error('No page open');
+    if (!this.page) return { status: 'error', message: 'No page open. Call browser_navigate first.' };
     
     let result = {
       status: 'success',
@@ -363,7 +384,7 @@ export class BrowserManager {
    * Type text and press Enter (useful for search boxes)
    */
   async typeAndSubmit({ selector, value }) {
-    if (!this.page) throw new Error('No page open');
+    if (!this.page) return { status: 'error', message: 'No page open. Call browser_navigate first.' };
     
     const check = await this.isElementInteractable(selector);
     if (!check.interactable) {
@@ -385,7 +406,7 @@ export class BrowserManager {
    * Wait for navigation after an action
    */
   async waitForNavigation({ timeout = 5000 } = {}) {
-    if (!this.page) throw new Error('No page open');
+    if (!this.page) return { status: 'error', message: 'No page open. Call browser_navigate first.' };
     try {
       await this.page.waitForLoadState('domcontentloaded', { timeout });
       return { status: 'success', url: this.page.url() };
@@ -397,11 +418,24 @@ export class BrowserManager {
   /**
    * Take a screenshot for evidence
    */
-  async screenshot({ path, fullPage = false }) {
-    if (!this.page) throw new Error('No page open');
+  async screenshot({ path: screenshotPath, fullPage = false }) {
+    if (!this.page) return { status: 'error', message: 'No page open. Call browser_navigate first.' };
+
+    // Validate path to prevent path traversal — screenshots must stay in cwd or below
     try {
-      const buffer = await this.page.screenshot({ path, fullPage });
-      return { status: 'success', path, size: buffer.length };
+      const { resolve, relative } = await import('path');
+      const resolved = resolve(screenshotPath);
+      const rel = relative(process.cwd(), resolved);
+      if (rel.startsWith('..')) {
+        return { status: 'error', message: `Path traversal blocked: "${screenshotPath}" resolves outside the working directory` };
+      }
+    } catch (e) {
+      return { status: 'error', message: `Invalid screenshot path: ${e.message}` };
+    }
+
+    try {
+      const buffer = await this.page.screenshot({ path: screenshotPath, fullPage });
+      return { status: 'success', path: screenshotPath, size: buffer.length };
     } catch (e) {
       return { status: 'error', message: e.message };
     }
@@ -411,7 +445,7 @@ export class BrowserManager {
    * Force click an element using JavaScript (bypasses visibility checks)
    */
   async forceClick({ selector }) {
-    if (!this.page) throw new Error('No page open');
+    if (!this.page) return { status: 'error', message: 'No page open. Call browser_navigate first.' };
     try {
       const result = await this.page.evaluate((sel) => {
         const el = document.querySelector(sel);
@@ -434,7 +468,7 @@ export class BrowserManager {
    * Scroll the page to reveal hidden elements
    */
   async scroll({ direction = 'down', amount = 500 }) {
-    if (!this.page) throw new Error('No page open');
+    if (!this.page) return { status: 'error', message: 'No page open. Call browser_navigate first.' };
     try {
       await this.page.evaluate((dir, amt) => {
         if (dir === 'down') window.scrollBy(0, amt);
@@ -453,7 +487,7 @@ export class BrowserManager {
    * Wait for an element to appear (useful for SPAs)
    */
   async waitForElement({ selector, timeout = 5000, state = 'visible' }) {
-    if (!this.page) throw new Error('No page open');
+    if (!this.page) return { status: 'error', message: 'No page open. Call browser_navigate first.' };
     try {
       await this.page.waitForSelector(selector, { state, timeout });
       return { status: 'success', selector, found: true };
@@ -467,7 +501,7 @@ export class BrowserManager {
    * Call this AFTER successful login to capture JWT/session tokens
    */
   async captureAuth() {
-    if (!this.page) throw new Error('No page open');
+    if (!this.page) return { status: 'error', message: 'No page open. Call browser_navigate first.' };
     
     try {
       // Extract tokens from localStorage and sessionStorage
@@ -551,14 +585,15 @@ export class BrowserManager {
    * Get current authentication status
    */
   getAuthStatus() {
-    return this.authManager.getStatus();
+    return { status: 'success', ...this.authManager.getStatus() };
   }
 
   /**
    * Clear stored authentication
    */
   clearAuth() {
-    return this.authManager.clear();
+    this.authManager.clear();
+    return { status: 'success', message: 'Authentication cleared' };
   }
 
   /**
@@ -577,6 +612,12 @@ export class BrowserManager {
    */
   async httpRequest({ url, method = 'GET', headers = {}, body = null, contentType = 'application/json', useAuth = true }) {
     try {
+      // Validate URL to prevent SSRF against internal/private networks
+      const ssrfCheck = BrowserManager._validateUrlForSSRF(url);
+      if (!ssrfCheck.safe) {
+        return { status: 'error', message: `SSRF protection: ${ssrfCheck.reason}`, url };
+      }
+
       // Auto-inject auth headers if available and useAuth is true
       const authHeaders = useAuth ? this.authManager.getAuthHeaders() : {};
 
@@ -622,8 +663,18 @@ export class BrowserManager {
       }
 
       // Use Node.js native fetch — no CORS restrictions, no page navigation required
+      // Add abort controller with 30s timeout to prevent hanging requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      fetchOptions.signal = controller.signal;
+
       const startTime = Date.now();
-      const response = await fetch(url, fetchOptions);
+      let response;
+      try {
+        response = await fetch(url, fetchOptions);
+      } finally {
+        clearTimeout(timeoutId);
+      }
       const endTime = Date.now();
       const responseTimeMs = endTime - startTime;
       const text = await response.text();
@@ -656,7 +707,7 @@ export class BrowserManager {
    * Execute JavaScript in the page context
    */
   async executeScript({ script }) {
-    if (!this.page) throw new Error('No page open');
+    if (!this.page) return { status: 'error', message: 'No page open. Call browser_navigate first.' };
     try {
       const result = await this.page.evaluate((code) => {
         try {
@@ -691,6 +742,55 @@ export class BrowserManager {
       this.page = null;
     }
     return { status: 'success' };
+  }
+
+  /**
+   * Validate a URL to prevent SSRF attacks against internal/private networks.
+   * Blocks requests to private IPs, loopback, link-local, and metadata endpoints.
+   *
+   * @param {string} urlStr - URL to validate
+   * @returns {{ safe: boolean, reason?: string }}
+   * @private
+   */
+  static _validateUrlForSSRF(urlStr) {
+    let parsed;
+    try {
+      parsed = new URL(urlStr);
+    } catch (e) {
+      return { safe: false, reason: 'Invalid URL' };
+    }
+
+    // Only allow http and https protocols
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return { safe: false, reason: `Protocol "${parsed.protocol}" is not allowed` };
+    }
+
+    const hostname = parsed.hostname;
+
+    // Block obvious private/internal hostnames
+    const blockedPatterns = [
+      /^localhost$/i,
+      /^127\.\d+\.\d+\.\d+$/,            // IPv4 loopback
+      /^10\.\d+\.\d+\.\d+$/,              // RFC1918 Class A
+      /^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/, // RFC1918 Class B
+      /^192\.168\.\d+\.\d+$/,             // RFC1918 Class C
+      /^169\.254\.\d+\.\d+$/,             // Link-local / cloud metadata
+      /^0\.0\.0\.0$/,                      // Unspecified
+      /^\[?::1\]?$/,                       // IPv6 loopback
+      /^\[?fe80:/i,                        // IPv6 link-local
+      /^\[?fc/i,                           // IPv6 unique local
+      /^\[?fd/i,                           // IPv6 unique local
+      /^metadata\.google\.internal$/i,     // GCP metadata
+      /^metadata\.internal$/i              // Generic cloud metadata
+    ];
+
+    for (const pattern of blockedPatterns) {
+      if (pattern.test(hostname)) {
+        return { safe: false, reason: `Hostname "${hostname}" resolves to a private/internal address` };
+      }
+    }
+
+    return { safe: true };
   }
 
   getTools() {

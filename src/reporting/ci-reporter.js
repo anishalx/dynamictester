@@ -19,7 +19,27 @@ export class CIReporter {
     } = options;
 
     try {
-      const evidenceFiles = await fs.readdir(evidenceDir);
+      // Check if evidence directory exists — missing dir means no findings (clean exit)
+      let evidenceFiles;
+      try {
+        evidenceFiles = await fs.readdir(evidenceDir);
+      } catch (e) {
+        if (e.code === 'ENOENT') {
+          // No evidence directory = no tests produced findings = clean exit
+          const emptySummary = { total: 0, confirmed: 0, likely: 0, blocked: 0, notReproducible: 0 };
+          return {
+            timestamp: new Date().toISOString(),
+            summary: emptySummary,
+            exitCode: 0,
+            exitReason: 'PASS: No findings',
+            confirmedExploits: [],
+            likelyExploits: [],
+            blockedTests: []
+          };
+        }
+        throw e; // Re-throw other errors (permissions, etc.)
+      }
+
       const findings = [];
 
       for (const file of evidenceFiles) {
@@ -104,6 +124,7 @@ export class CIReporter {
           break;
         case 'NOT_REPRODUCIBLE':
         case 'NOT REPRODUCIBLE':
+        case 'TESTED_NOT_EXPLOITABLE':
           summary.notReproducible++;
           break;
         default:
@@ -152,6 +173,9 @@ export class CIReporter {
    * @returns {string} Reason
    */
   static getExitReason(exitCode, summary) {
+    if (exitCode === 2) {
+      return 'ERROR: CI report generation encountered an error';
+    }
     if (exitCode === 0) {
       return `PASS: No confirmed exploits (${summary.notReproducible} not reproducible, ${summary.blocked} blocked)`;
     }

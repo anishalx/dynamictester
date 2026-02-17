@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import dotenv from 'dotenv';
-dotenv.config({ quiet: true });
+dotenv.config();
 
 import chalk from 'chalk';
 import inquirer from 'inquirer';
@@ -10,8 +10,8 @@ import { generateExploitationQueue } from './queue/queue-generator.js';
 import { executeExploitationAgent } from './agents/executor.js';
 import { path, fs } from 'zx';
 import { getSupportedAnalyzers } from './parser/parser-factory.js';
-import { generateSarifReport, generateHtmlReport, generateDeveloperSummary } from './reporting/report-generator.js';
-import { CIReporter, runCIMode } from './reporting/ci-reporter.js';
+import { generateSarifReport, generateHtmlReport, generateDeveloperSummary, generateAllReports } from './reporting/report-generator.js';
+import { runCIMode } from './reporting/ci-reporter.js';
 import {
   getProvider,
   getAllProviders,
@@ -42,20 +42,30 @@ const isCIMode = args.includes('--ci');
 const ciFailOnLikely = args.includes('--fail-on-likely');
 const ciFailOnBlocked = args.includes('--fail-on-blocked');
 
+// Parse CI-compatible CLI args for non-interactive mode
+const cliTarget = args.find(a => a.startsWith('--target='))?.split('=')[1]?.trim();
+const cliResults = args.find(a => a.startsWith('--results='))?.split('=')[1]?.trim();
+const cliOutput = args.find(a => a.startsWith('--output='))?.split('=')[1]?.trim();
+
 if (subcommand === 'auth') {
   const action = args[1]; // login | status | logout
-  if (action === 'login') {
-    await authLogin();
-  } else if (action === 'status') {
-    await authStatus();
-  } else if (action === 'logout') {
-    await authLogout();
-  } else {
-    console.log(chalk.cyan('Usage:'));
-    console.log(chalk.gray('  node src/main.js auth login    - Configure LLM provider credentials'));
-    console.log(chalk.gray('  node src/main.js auth status   - Show configured providers'));
-    console.log(chalk.gray('  node src/main.js auth logout   - Remove stored credentials'));
-    process.exit(0);
+  try {
+    if (action === 'login') {
+      await authLogin();
+    } else if (action === 'status') {
+      await authStatus();
+    } else if (action === 'logout') {
+      await authLogout();
+    } else {
+      console.log(chalk.cyan('Usage:'));
+      console.log(chalk.gray('  node src/main.js auth login    - Configure LLM provider credentials'));
+      console.log(chalk.gray('  node src/main.js auth status   - Show configured providers'));
+      console.log(chalk.gray('  node src/main.js auth logout   - Remove stored credentials'));
+      process.exit(0);
+    }
+  } catch (authError) {
+    console.error(chalk.red(`\nAuth error: ${authError.message}`));
+    process.exit(1);
   }
 } else {
   await main();
@@ -205,45 +215,82 @@ async function main() {
 
   // ------------------------------------------------------------------
   // Prompt 1-3: Analyzer results, target URL, output directory
+  // In CI mode, use --results=, --target=, --output= CLI args instead
   // ------------------------------------------------------------------
-  const answers = await inquirer.prompt([
-    {
-      type: 'input',
-      name: 'resultJsonPath',
-      message: 'Path to analyzer result file(s) (comma-separated for multiple):',
-      validate: async (input) => {
-        const paths = input.split(',').map(p => p.trim());
-        for (const p of paths) {
-          if (!(await fs.pathExists(p))) {
-            return `File does not exist: ${p}`;
+  let resultJsonPath;
+  let targetUrl;
+  let outputDir;
+
+  if (isCIMode) {
+    // CI mode: require CLI args, no interactive prompts
+    if (!cliResults) {
+      console.error(chalk.red('CI mode requires --results=<path> argument (comma-separated for multiple files).'));
+      process.exit(2);
+    }
+    if (!cliTarget) {
+      console.error(chalk.red('CI mode requires --target=<url> argument.'));
+      process.exit(2);
+    }
+    resultJsonPath = cliResults;
+    targetUrl = cliTarget;
+    outputDir = cliOutput || './output';
+
+    // Validate paths exist
+    const paths = resultJsonPath.split(',').map(p => p.trim());
+    for (const p of paths) {
+      if (!(await fs.pathExists(p))) {
+        console.error(chalk.red(`Result file does not exist: ${p}`));
+        process.exit(2);
+      }
+    }
+    // Validate URL
+    try {
+      new URL(targetUrl);
+    } catch {
+      console.error(chalk.red(`Invalid target URL: ${targetUrl}`));
+      process.exit(2);
+    }
+  } else {
+    const answers = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'resultJsonPath',
+        message: 'Path to analyzer result file(s) (comma-separated for multiple):',
+        validate: async (input) => {
+          const paths = input.split(',').map(p => p.trim());
+          for (const p of paths) {
+            if (!(await fs.pathExists(p))) {
+              return `File does not exist: ${p}`;
+            }
+          }
+          return true;
+        }
+      },
+      {
+        type: 'input',
+        name: 'targetUrl',
+        message: 'Target URL for dynamic testing:',
+        default: 'http://localhost:3000',
+        validate: (input) => {
+          try {
+            new URL(input);
+            return true;
+          } catch {
+            return 'Please enter a valid URL.';
           }
         }
-        return true;
+      },
+      {
+        type: 'input',
+        name: 'outputDir',
+        message: 'Output directory for results and evidence:',
+        default: './output'
       }
-    },
-    {
-      type: 'input',
-      name: 'targetUrl',
-      message: 'Target URL for dynamic testing:',
-      default: 'http://localhost:3000',
-      validate: (input) => {
-        try {
-          new URL(input);
-          return true;
-        } catch {
-          return 'Please enter a valid URL.';
-        }
-      }
-    },
-    {
-      type: 'input',
-      name: 'outputDir',
-      message: 'Output directory for results and evidence:',
-      default: './output'
-    }
-  ]);
-
-  const { resultJsonPath, targetUrl, outputDir } = answers;
+    ]);
+    resultJsonPath = answers.resultJsonPath;
+    targetUrl = answers.targetUrl;
+    outputDir = answers.outputDir;
+  }
 
   // ------------------------------------------------------------------
   // Prompt 4: Provider and model selection
@@ -315,14 +362,19 @@ async function main() {
           console.log(chalk.gray(`   ... and ${queue.length - 5} more`));
         }
 
-        const { runTests } = await inquirer.prompt([
-          {
-            type: 'confirm',
-            name: 'runTests',
-            message: `Run dynamic exploitation tests for ${type}?`,
-            default: true
-          }
-        ]);
+        // In CI mode, auto-run all tests without prompting
+        let runTests = true;
+        if (!isCIMode) {
+          const confirmation = await inquirer.prompt([
+            {
+              type: 'confirm',
+              name: 'runTests',
+              message: `Run dynamic exploitation tests for ${type}?`,
+              default: true
+            }
+          ]);
+          runTests = confirmation.runTests;
+        }
 
         if (runTests) {
           const queuePath = path.resolve(outputDir, 'deliverables', `${type}_exploitation_queue.json`);
@@ -360,21 +412,25 @@ async function main() {
     await fs.ensureDir(evidenceDir);
     
     try {
-      await generateDeveloperSummary(evidenceDir, path.join(outputDir, 'developer_summary.json'));
+      await generateAllReports(evidenceDir, outputDir, { targetUrl });
     } catch (reportError) {
-      console.log(chalk.yellow(`⚠️ Developer summary warning: ${reportError.message}`));
-    }
-    
-    try {
-      await generateSarifReport(evidenceDir, path.join(outputDir, 'report.sarif.json'), { targetUrl });
-    } catch (reportError) {
-      console.log(chalk.yellow(`⚠️ SARIF report warning: ${reportError.message}`));
-    }
-    
-    try {
-      await generateHtmlReport(evidenceDir, path.join(outputDir, 'report.html'), { targetUrl });
-    } catch (reportError) {
-      console.log(chalk.yellow(`⚠️ HTML report warning: ${reportError.message}`));
+      console.log(chalk.yellow(`⚠️ Report generation warning: ${reportError.message}`));
+      // Fall back to individual report generation
+      try {
+        await generateDeveloperSummary(evidenceDir, path.join(outputDir, 'developer_summary.json'));
+      } catch (e) {
+        console.log(chalk.yellow(`⚠️ Developer summary warning: ${e.message}`));
+      }
+      try {
+        await generateSarifReport(evidenceDir, path.join(outputDir, 'report.sarif.json'), { targetUrl });
+      } catch (e) {
+        console.log(chalk.yellow(`⚠️ SARIF report warning: ${e.message}`));
+      }
+      try {
+        await generateHtmlReport(evidenceDir, path.join(outputDir, 'report.html'), { targetUrl });
+      } catch (e) {
+        console.log(chalk.yellow(`⚠️ HTML report warning: ${e.message}`));
+      }
     }
 
     // CI mode: generate CI report and exit with appropriate code
@@ -469,6 +525,27 @@ async function selectProviderAndModel() {
     const modelId = cliModel || provider.getDefaultModel();
     console.log(chalk.gray(`\nUsing CLI override: ${cliProvider}/${modelId}`));
     return { providerName: cliProvider, modelId, client, providerConfig, fallbackProviders: buildFallbacks(cliProvider) };
+  }
+
+  // CI mode: use stored default or first available provider, no interactive prompts
+  if (isCIMode) {
+    let providerName;
+    let modelId;
+
+    if (config.defaultProvider && config.defaultModel) {
+      providerName = config.defaultProvider;
+      modelId = config.defaultModel;
+    } else {
+      // Use first configured provider
+      providerName = configured[0].name;
+      const provider = getProvider(providerName);
+      modelId = provider.getDefaultModel();
+    }
+
+    console.log(chalk.gray(`\nCI mode: using ${providerName}/${modelId}`));
+    const providerConfig = await getProviderConfig(providerName);
+    const client = await createClientForProvider(providerName);
+    return { providerName, modelId, client, providerConfig, fallbackProviders: buildFallbacks(providerName) };
   }
 
   let providerName;
@@ -577,7 +654,7 @@ Document successful exploits with proof.
 - browser_navigate: Navigate to a URL
 - browser_fill: Fill form fields with payloads
 - browser_click: Click buttons/submit forms
-- browser_get_response: Get page content after action
+- browser_http_request: Send HTTP requests and get responses
 - save_evidence: Save exploitation evidence
 </available_tools>
 `;

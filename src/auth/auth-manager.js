@@ -42,6 +42,9 @@ export class AuthManager {
    * @param {Array|Object} cookies - Cookies from Playwright context
    */
   setCookies(cookies) {
+    if (!cookies) {
+      return { success: true, cookieCount: Object.keys(this.cookies).length };
+    }
     if (Array.isArray(cookies)) {
       cookies.forEach(cookie => {
         this.cookies[cookie.name] = cookie.value;
@@ -194,6 +197,11 @@ export function getAuthManager() {
   return authManagerInstance;
 }
 
+/**
+ * Reset the singleton AuthManager (creates a fresh instance).
+ * @deprecated Not imported anywhere — consider using getAuthManager().clear() instead.
+ * @returns {AuthManager}
+ */
 export function resetAuthManager() {
   if (authManagerInstance) {
     authManagerInstance.clear();

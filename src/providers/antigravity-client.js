@@ -48,16 +48,6 @@ const API_CLIENT_VALUES = [
 ];
 
 /**
- * Map Node.js platform strings to Antigravity platform names.
- * @type {Record<string, string>}
- */
-const PLATFORM_MAP = {
-  linux: 'MACOS',
-  darwin: 'MACOS',
-  win32: 'WINDOWS'
-};
-
-/**
  * Build a randomized User-Agent string matching the opencode plugin pattern.
  * @returns {string}
  */
@@ -286,7 +276,7 @@ export class AntigravityClient {
           for (const prev of messages) {
             if (prev.tool_calls) {
               const match = prev.tool_calls.find(tc => tc.id === msg.tool_call_id);
-              if (match) {
+              if (match && match.function) {
                 functionName = match.function.name;
                 break;
               }
@@ -511,6 +501,9 @@ export class AntigravityClient {
    * @returns {Promise<object>} OpenAI-format chat completion response
    */
   async _createCompletion(params) {
+    if (!this._accessToken) {
+      throw new Error('Antigravity access token not set. Call setAccessToken() or re-authenticate.');
+    }
     const model = params.model || this._defaultModel;
     const { contents, systemInstruction } = this._convertMessages(params.messages || []);
     const geminiTools = this._convertTools(params.tools);
@@ -577,14 +570,27 @@ export class AntigravityClient {
      const endpointsToTry = [this._sandboxUrl, ...ANTIGRAVITY_ENDPOINTS.filter(e => e !== this._sandboxUrl)];
      let lastError = null;
  
-     for (const endpoint of endpointsToTry) {
-       const url = `${endpoint}/v1internal:generateContent`;
- 
-       const resp = await fetch(url, {
-         method: 'POST',
-         headers,
-         body: JSON.stringify(requestBody)
-       });
+      for (const endpoint of endpointsToTry) {
+        const url = `${endpoint}/v1internal:generateContent`;
+  
+        let resp;
+        try {
+          resp = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(requestBody)
+          });
+        } catch (networkErr) {
+          // Network errors (DNS failure, connection refused, timeout) — try next endpoint
+          lastError = new Error(`Network error on ${new URL(url).hostname}: ${networkErr.message}`);
+          lastError.status = 0;
+          lastError.type = 'api_error';
+          if (endpoint !== endpointsToTry[endpointsToTry.length - 1]) {
+            console.warn(`   Antigravity network error on ${new URL(url).hostname}, trying next endpoint...`);
+            continue;
+          }
+          throw lastError;
+        }
  
        if (resp.ok) {
          const geminiResponse = await resp.json();

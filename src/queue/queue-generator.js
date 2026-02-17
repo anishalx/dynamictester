@@ -92,11 +92,10 @@ export async function generateExploitationQueue(vulnerabilities, outputDir) {
   
   // Group vulnerabilities by type
   for (const vuln of vulnerabilities) {
-    const queueType = vuln.type || 'other';
+    const rawType = vuln.type || 'other';
     
-    if (!queues[queueType]) {
-      queues[queueType] = [];
-    }
+    // Guard against prototype pollution — only allow known queue types, route unknown to 'other'
+    const queueType = Object.prototype.hasOwnProperty.call(queues, rawType) ? rawType : 'other';
     
     const loc = vuln.location || {};
     const priority = calculatePriority(vuln);

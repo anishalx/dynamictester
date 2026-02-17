@@ -1,5 +1,5 @@
 import { BaseParser } from '../parser-interface.js';
-import { normalizeSeverity, normalizeConfidence, categorizeVulnerability } from '../normalizer.js';
+import { normalizeSeverity, normalizeConfidence, categorizeVulnerability, generateVulnerabilityId } from '../normalizer.js';
 
 /**
  * Parser for CodeQL SARIF output
@@ -73,22 +73,24 @@ export class CodeQLParser extends BaseParser {
         const precision = rule.properties?.precision || 'medium';
         const mappedConfidence = precision === 'very-high' ? 'HIGH' : precision;
 
-        vulnerabilities.push({
-          id: `CODEQL-${ruleId}-${file}-${region.startLine}`,
-          source: 'codeql',
-          sourceVersion: this.analyzerVersion,
-          type,
-          subType,
-          severity: normalizeSeverity(severity),
-          confidence: normalizeConfidence(mappedConfidence),
-          location: {
+        const vulnLocation = {
             file: file ?? 'unknown',
             line: region.startLine ?? 0,
             column: region.startColumn ?? 0,
             endLine: region.endLine ?? region.startLine ?? 0,
             endColumn: region.endColumn ?? region.startColumn ?? 0,
             snippet: region.snippet?.text ?? ''
-          },
+          };
+
+        vulnerabilities.push({
+          id: generateVulnerabilityId('codeql', ruleId, vulnLocation),
+          source: 'codeql',
+          sourceVersion: this.analyzerVersion,
+          type,
+          subType,
+          severity: normalizeSeverity(severity),
+          confidence: normalizeConfidence(mappedConfidence),
+          location: vulnLocation,
           description: result.message?.text || rule.shortDescription?.text || '',
           remediation: rule.help?.text || '',
           cwe,

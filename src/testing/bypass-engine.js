@@ -21,6 +21,16 @@ export class BypassEngine {
   }
 
   /**
+   * Reset the engine state for testing a new vulnerability.
+   * Clears blocked-payload history and resets the attempt counter.
+   */
+  reset() {
+    this.attemptCount = 0;
+    this.blockedPayloads = [];
+    this.successfulBypass = null;
+  }
+
+  /**
    * Generate bypass variations for a blocked payload.
    * Uses deterministic encoding and transformation techniques (no LLM needed).
    *
@@ -38,12 +48,13 @@ export class BypassEngine {
     });
 
     const vulnType = vulnerability.vulnerabilityType || vulnerability.type || 'injection';
+    const subType = vulnerability.subType || '';
 
     // Generate encoding-based bypasses
     const encodingBypasses = this._getEncodingBypasses(blockedPayload);
 
     // Generate technique-based bypasses
-    const techniqueBypasses = this._getTechniqueBypasses(blockedPayload, vulnType, techContext);
+    const techniqueBypasses = this._getTechniqueBypasses(blockedPayload, vulnType, subType, techContext);
 
     // Generate WAF-specific bypasses
     const wafBypasses = this._getWAFBypasses(blockedPayload, blockingContext, vulnType);
@@ -142,14 +153,16 @@ export class BypassEngine {
   /**
    * @private
    */
-  _getTechniqueBypasses(payload, vulnType, techContext) {
+  _getTechniqueBypasses(payload, vulnType, subType, techContext) {
     const bypasses = [];
+    const isSQLInjection = vulnType === 'injection' && (subType === 'SQLi' || subType === 'NoSQLi' || !subType);
+    const isCommandInjection = vulnType === 'command_injection' || subType === 'CommandInjection';
 
-    if (vulnType === 'injection' || vulnType === 'command_injection') {
+    if (isSQLInjection) {
       // Case variation
       bypasses.push(this._randomCase(payload));
 
-      // Comment injection (SQL)
+      // Comment injection (SQL-specific)
       bypasses.push(payload.replace(/ /g, '/**/'));
       bypasses.push(payload.replace(/ /g, '%09')); // Tab
       bypasses.push(payload.replace(/ /g, '%0a')); // Newline
@@ -180,6 +193,35 @@ export class BypassEngine {
           bypasses.push(payload.replace(/SLEEP\((\d+)\)/gi, "WAITFOR DELAY '0:0:$1'"));
         }
       }
+    }
+
+    if (isCommandInjection) {
+      // Case variation
+      bypasses.push(this._randomCase(payload));
+
+      // Whitespace substitution (shell-specific)
+      bypasses.push(payload.replace(/ /g, '%09')); // Tab
+      bypasses.push(payload.replace(/ /g, '${IFS}')); // Internal Field Separator
+      bypasses.push(payload.replace(/ /g, '<')); // Input redirection as separator
+
+      // Command separators
+      if (payload.includes(';')) {
+        bypasses.push(payload.replace(/;/g, '%0a')); // Newline
+        bypasses.push(payload.replace(/;/g, '|')); // Pipe
+        bypasses.push(payload.replace(/;/g, '&&')); // AND
+      }
+
+      // Quote-based obfuscation (e.g., c""at -> cat)
+      bypasses.push(payload.replace(/([a-z]{2,})/gi, (m) => {
+        const mid = Math.floor(m.length / 2);
+        return m.slice(0, mid) + "''" + m.slice(mid);
+      }));
+
+      // Backslash insertion (e.g., c\at -> cat)
+      bypasses.push(payload.replace(/([a-z]{2,})/gi, (m) => {
+        const mid = Math.floor(m.length / 2);
+        return m.slice(0, mid) + '\\' + m.slice(mid);
+      }));
     }
 
     if (vulnType === 'xss') {
@@ -275,10 +317,8 @@ export class BypassEngine {
 
     // Generic WAF bypasses
     if (blockingContext.httpStatus === 403 || blockingContext.httpStatus === 406) {
-      // Try with different content types
-      bypasses.push(payload); // Same payload, different Content-Type suggested
-      // Chunked transfer encoding hint
-      bypasses.push(payload.split('').join(String.fromCharCode(0))); // Null byte insertion
+      // Try with different content types (guidance tells the LLM to change Content-Type)
+      bypasses.push(payload);
     }
 
     return bypasses;
@@ -332,6 +372,12 @@ export class BypassEngine {
       guidance += '- Try hex-encoded string literals.\n';
     }
 
+    if (vulnType === 'command_injection') {
+      guidance += '\n- Try alternative command separators (|, &&, ||, \\n).\n';
+      guidance += '- Use shell variable expansion ($IFS, ${IFS}) for whitespace.\n';
+      guidance += '- Try encoding the command name with quotes or backslashes.\n';
+    }
+
     return guidance;
   }
 
@@ -347,8 +393,11 @@ export class BypassEngine {
       'Hex encoding'
     ];
 
-    if (vulnType === 'injection' || vulnType === 'command_injection') {
+    if (vulnType === 'injection') {
       techniques.push('Case variation', 'Comment injection (/**/)', 'Whitespace substitution', 'String concatenation');
+    }
+    if (vulnType === 'command_injection') {
+      techniques.push('Case variation', 'IFS substitution', 'Command separator variation', 'Quote-based obfuscation');
     }
     if (vulnType === 'xss') {
       techniques.push('Tag variation', 'Event handler substitution', 'SVG/MathML alternatives');
@@ -408,15 +457,6 @@ export class BypassEngine {
    */
   getSuccessfulBypass() {
     return this.successfulBypass;
-  }
-
-  /**
-   * Reset the engine state
-   */
-  reset() {
-    this.attemptCount = 0;
-    this.blockedPayloads = [];
-    this.successfulBypass = null;
   }
 }
 

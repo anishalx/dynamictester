@@ -1,5 +1,5 @@
 import { BaseParser } from '../parser-interface.js';
-import { normalizeSeverity } from '../normalizer.js';
+import { normalizeSeverity, generateVulnerabilityId } from '../normalizer.js';
 
 /**
  * Parser for Syft SBOM (Software Bill of Materials) output
@@ -35,22 +35,24 @@ export class SyftParser extends BaseParser {
       // Only flag packages with known issues if metadata exists
       if (artifact.metadata?.vulnerabilities) {
         for (const vuln of artifact.metadata.vulnerabilities) {
-          vulnerabilities.push({
-            id: vuln.id || `SYFT-${artifact.name}-${artifact.version}`,
-            source: 'syft',
-            sourceVersion: this.analyzerVersion,
-            type: 'dependency',
-            subType: 'VulnerableDependency',
-            severity: normalizeSeverity(vuln.severity || 'MEDIUM'),
-            confidence: 'MEDIUM',
-            location: {
+          const syftLocation = {
               file: artifact.locations?.[0]?.path || 'dependencies',
               line: 0,
               column: 0,
               endLine: 0,
               endColumn: 0,
               snippet: `${artifact.name}@${artifact.version}`
-            },
+            };
+
+          vulnerabilities.push({
+            id: generateVulnerabilityId('syft', vuln.id || artifact.id, syftLocation),
+            source: 'syft',
+            sourceVersion: this.analyzerVersion,
+            type: 'dependency',
+            subType: 'VulnerableDependency',
+            severity: normalizeSeverity(vuln.severity || 'MEDIUM'),
+            confidence: 'MEDIUM',
+            location: syftLocation,
             description: vuln.description || `Dependency: ${artifact.name}@${artifact.version}`,
             remediation: vuln.fixedInVersion ? `Update to ${vuln.fixedInVersion}` : 'Review dependency',
             cwe: [],

@@ -230,7 +230,7 @@ export class RouteParser {
   findRoutesForFile(filePath, line = null) {
     return this.routes.filter(route => {
       const fileMatch = route.file.endsWith(filePath) || filePath.endsWith(route.file);
-      if (line) {
+      if (line != null) {
         // Return routes within 10 lines of the target
         return fileMatch && Math.abs(route.line - line) <= 10;
       }

@@ -3,7 +3,7 @@ import { DeepSeekProvider } from './deepseek-provider.js';
 import { QwenProvider } from './qwen-provider.js';
 import { CopilotProvider } from './copilot-provider.js';
 import { GoogleProvider } from './google-provider.js';
-import { getProviderConfig, getConfiguredProviders as getConfiguredProviderNames } from '../config/config-manager.js';
+import { getProviderConfig } from '../config/config-manager.js';
 
 /**
  * @typedef {import('./provider-interface.js').BaseProvider} BaseProvider
@@ -108,6 +108,9 @@ export async function createClientForProvider(providerName) {
 
   // Google Antigravity needs async token refresh
   if (providerName === 'google' && config?.authMode === 'antigravity') {
+    if (typeof provider.createClientAsync !== 'function') {
+      throw new Error(`Provider "${providerName}" does not support async client creation`);
+    }
     return provider.createClientAsync(config);
   }
 
