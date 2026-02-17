@@ -33,7 +33,7 @@ import {
 const args = process.argv.slice(2);
 const subcommand = args[0];
 
-// Parse --provider and --model CLI flags (e.g. --provider=copilot --model=gpt-4o)
+// Parse --provider and --model CLI flags (e.g. --provider=google --model=gemini-2.5-pro)
 const cliProvider = args.find(a => a.startsWith('--provider='))?.split('=')[1];
 const cliModel = args.find(a => a.startsWith('--model='))?.split('=')[1];
 

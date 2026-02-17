@@ -2,7 +2,7 @@
 
 **AI-powered DAST tool that bridges static analysis with automated exploitation validation.**
 
-Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL, Gitleaks, OSV, Syft, Noir) and uses LLM agents combined with Playwright browser automation to dynamically test, validate, and produce developer-friendly reports. Supports 6 LLM providers out of the box.
+Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL, Gitleaks, OSV, Syft, Noir) and uses LLM agents combined with Playwright browser automation to dynamically test, validate, and produce developer-friendly reports. Supports 5 LLM providers out of the box.
 
 ---
 
@@ -11,7 +11,7 @@ Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL,
 | Feature | Description |
 |---------|-------------|
 | **Multi-Analyzer Support** | Parses output from 7 static analyzers with auto-detection |
-| **6 LLM Providers** | OpenAI, DeepSeek, Qwen, GitHub Models, Google Gemini, GitHub Copilot |
+| **5 LLM Providers** | OpenAI, DeepSeek, Qwen, GitHub Copilot, Google Gemini |
 | **20 Agent Tools** | 15 browser tools + 5 exploitation workflow tools |
 | **16 Vulnerability Categories** | Injection, XSS, SSRF, XXE, traversal, auth, secrets, and more |
 | **Content-Based Deduplication** | SHA-256 hashing eliminates duplicate findings across analyzers |
@@ -90,7 +90,7 @@ Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL,
 |                                                                           |
 |  +--------------------------------------------------------------------+  |
 |  |                     Provider Registry                              |  |
-|  |  OpenAI | DeepSeek | Qwen | GitHub Models | Gemini | Copilot      |  |
+|  |  OpenAI | DeepSeek | Qwen | GitHub Copilot | Gemini             |  |
 |  +--------------------------------------------------------------------+  |
 +---------------------------------------------------------------------------+
 ```
@@ -140,9 +140,8 @@ dynamictester/
 │   │   ├── openai-provider.js           # OpenAI (GPT-4o, o1, o3-mini)
 │   │   ├── deepseek-provider.js         # DeepSeek (V3, R1)
 │   │   ├── qwen-provider.js             # Qwen / Alibaba Cloud (max, plus, coder, flash, turbo)
-│   │   ├── github-provider.js           # GitHub Models (GPT-4o, DeepSeek-R1, Llama, Mistral)
+│   │   ├── copilot-provider.js          # GitHub Copilot (GPT-4o, Claude via Copilot subscription)
 │   │   ├── google-provider.js           # Google Gemini (API key) + Antigravity OAuth
-│   │   ├── copilot-provider.js          # GitHub Copilot (Claude, Gemini, GPT via device code)
 │   │   ├── antigravity-client.js        # OpenAI-compatible adapter for Antigravity API
 │   │   └── google-oauth.js              # Google OAuth 2.0 + PKCE for Antigravity
 │   │
@@ -233,7 +232,7 @@ node src/main.js
 node src/main.js
 
 # With provider/model override
-node src/main.js --provider=copilot --model=claude-sonnet-4.5
+node src/main.js --provider=google --model=gemini-2.5-pro
 
 # CI/CD mode
 node src/main.js --ci --fail-on-likely
@@ -243,8 +242,8 @@ node src/main.js --ci --fail-on-likely
 
 | Flag | Description |
 |------|-------------|
-| `--provider=<name>` | Override LLM provider (`openai`, `deepseek`, `qwen`, `github`, `google`, `copilot`) |
-| `--model=<name>` | Override LLM model (e.g., `gpt-4o`, `claude-sonnet-4.5`, `deepseek-chat`) |
+| `--provider=<name>` | Override LLM provider (`openai`, `deepseek`, `qwen`, `copilot`, `google`) |
+| `--model=<name>` | Override LLM model (e.g., `gpt-4o`, `gemini-2.5-pro`, `deepseek-chat`) |
 | `--ci` | Enable CI/CD mode -- generate CI report and exit with status code |
 | `--fail-on-likely` | In CI mode, also fail for LIKELY-classified findings |
 | `--fail-on-blocked` | In CI mode, also fail for BLOCKED-classified findings |
@@ -291,7 +290,7 @@ Supported analyzers: semgrep, gitleaks, trivy, osv, syft, noir, codeql
 
 ? Run dynamic exploitation tests for injection? (Y/n)
 
-🚀 Starting exploitation agent (claude-sonnet-4.5 via GitHub Copilot)...
+🚀 Starting exploitation agent (gemini-2.5-pro via Google Gemini)...
    Rate limit handling: 3 retries with exponential backoff
    Loaded 11 vulnerabilities from queue
 
@@ -328,7 +327,7 @@ Supported analyzers: semgrep, gitleaks, trivy, osv, syft, noir, codeql
 
 ## Auth & Providers
 
-The tool supports 6 LLM providers. All providers expose an OpenAI-compatible client interface, so the exploitation agent works identically regardless of provider.
+The tool supports 5 LLM providers. All providers expose an OpenAI-compatible client interface, so the exploitation agent works identically regardless of provider.
 
 ### Provider Overview
 
@@ -337,9 +336,8 @@ The tool supports 6 LLM providers. All providers expose an OpenAI-compatible cli
 | **OpenAI** | `openai` | `gpt-4o` | API key | `OPENAI_API_KEY` |
 | **DeepSeek** | `deepseek` | `deepseek-chat` | API key | `DEEPSEEK_API_KEY` |
 | **Qwen** | `qwen` | `qwen-max` | DashScope API key + region | `DASHSCOPE_API_KEY` |
-| **GitHub Models** | `github` | `gpt-4o` | GitHub PAT (`ghp_*`) | `GITHUB_TOKEN` |
+| **GitHub Copilot** | `copilot` | `gpt-4o` | GitHub Device Code OAuth | — |
 | **Google Gemini** | `google` | `gemini-2.5-flash` | API key or Antigravity OAuth | `GOOGLE_API_KEY` |
-| **GitHub Copilot** | `copilot` | `claude-sonnet-4.5` | Device code OAuth | `GITHUB_COPILOT_TOKEN` |
 
 ### Provider Selection Priority
 
@@ -356,10 +354,10 @@ Provider credentials are stored in `~/.config/dynamictester/config.json`:
 ```json
 {
   "version": 1,
-  "defaultProvider": "copilot",
-  "defaultModel": "claude-sonnet-4.5",
+  "defaultProvider": "google",
+  "defaultModel": "gemini-2.5-flash",
   "providers": {
-    "copilot": { "token": "ghu_...", "configured": true },
+    "google": { "apiKey": "AIza...", "configured": true },
     "openai": { "apiKey": "sk-...", "configured": true }
   }
 }
@@ -367,11 +365,11 @@ Provider credentials are stored in `~/.config/dynamictester/config.json`:
 
 ### Provider-Specific Notes
 
-**GitHub Copilot** authenticates via GitHub Device Code flow (same as VS Code). Run `auth login`, select Copilot, and follow the browser prompt. Models are fetched dynamically from the API.
-
 **Google Gemini** has two modes:
 - **API Key** (simple) -- enter a Gemini API key, uses `generativelanguage.googleapis.com`
 - **Antigravity OAuth** (advanced) -- full Google Cloud OAuth with PKCE, enables access to additional models (Claude, GPT via Antigravity)
+
+**GitHub Copilot** uses GitHub Device Code OAuth (same flow as VS Code / GitHub CLI). Requires an active GitHub Copilot subscription. Available models are fetched dynamically from the Copilot API.
 
 **Qwen** prompts for a region (International/Singapore, US/Virginia, or China/Beijing) which determines the API endpoint.
 

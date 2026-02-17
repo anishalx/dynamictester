@@ -1,11 +1,8 @@
 import { OpenAIProvider } from './openai-provider.js';
 import { DeepSeekProvider } from './deepseek-provider.js';
 import { QwenProvider } from './qwen-provider.js';
-import { GitHubProvider } from './github-provider.js';
-import { GoogleProvider } from './google-provider.js';
 import { CopilotProvider } from './copilot-provider.js';
-import { QwenPortalProvider } from './qwen-portal-provider.js';
-import { OpenAICodexProvider } from './openai-codex-provider.js';
+import { GoogleProvider } from './google-provider.js';
 import { getProviderConfig, getConfiguredProviders as getConfiguredProviderNames } from '../config/config-manager.js';
 
 /**
@@ -21,11 +18,8 @@ const PROVIDER_REGISTRY = Object.freeze({
   openai: OpenAIProvider,
   deepseek: DeepSeekProvider,
   qwen: QwenProvider,
-  'qwen-portal': QwenPortalProvider,
-  'openai-codex': OpenAICodexProvider,
-  github: GitHubProvider,
-  google: GoogleProvider,
-  copilot: CopilotProvider
+  copilot: CopilotProvider,
+  google: GoogleProvider
 });
 
 /**

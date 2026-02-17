@@ -54,7 +54,7 @@ function truncateResult(obj, maxLen = MAX_TOOL_RESULT_LENGTH) {
  * @param {string} [options.model='gpt-4o'] - Model identifier
  * @param {number} [options.maxRetries=3] - Max API retries
  * @param {import('openai').default} [options.client] - Pre-configured OpenAI SDK client
- * @param {string} [options.providerName] - Provider key (openai, deepseek, qwen, qwen-portal, github, google, copilot)
+ * @param {string} [options.providerName] - Provider key (openai, deepseek, qwen, copilot, google)
  * @param {object} [options.providerConfig] - Stored provider config (apiKey, baseURL, token, etc.)
  * @param {Array<{name: string, model: string}>} [options.fallbackProviders] - Fallback providers to try on quota exhaustion
  */
@@ -813,7 +813,7 @@ COMPLETION:
       console.log(chalk.blue(`\n🤖 Turn ${turnCount + 1}:`));
 
       // Force tool use until evidence has been saved; use 'auto' once testing has started
-      // Some providers (e.g. qwen-portal in thinking mode) reject tool_choice: "required"
+      // Some providers (e.g. Qwen in thinking mode) reject tool_choice: "required"
       let effectiveToolChoice = (evidenceSavedCount === 0 && toolChoiceSupported) ? 'required' : 'auto';
 
       // Use rate limiter for API call with retry logic
@@ -879,7 +879,7 @@ COMPLETION:
             if (isTos) {
               console.log(chalk.yellow(`      • Try a different Google account`));
               console.log(chalk.yellow(`      • Use a Gemini API key instead of Antigravity OAuth`));
-              console.log(chalk.yellow(`      • Switch to GitHub Copilot provider`));
+              console.log(chalk.yellow(`      • Switch to a different provider`));
             } else {
               console.log(chalk.yellow(`      • Re-authenticate: node src/main.js auth login`));
               console.log(chalk.yellow(`      • Switch to a different provider or account`));

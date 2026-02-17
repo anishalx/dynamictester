@@ -679,7 +679,7 @@ export class AntigravityClient {
             + '\n    1. Try a different Google account'
             + '\n    2. Re-authenticate: node src/main.js auth login'
             + '\n    3. Use a Gemini API key instead (simpler, more reliable)'
-            + '\n    4. Switch to GitHub Copilot provider';
+            + '\n    4. Switch to a different provider';
         } else {
           message = 'Antigravity API error (403 PERMISSION_DENIED): ' + apiMessage
             + '\n  You may not have access to this model or project.'
