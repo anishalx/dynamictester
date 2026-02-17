@@ -5,10 +5,12 @@ import { BrowserManager } from '../mcp/browser-server.js';
 import { 
   RateLimiter, 
   isRateLimitError, 
+  isModelNotFoundError,
   classifyError,
   formatDelay,
   sleep 
 } from '../utils/rate-limiter.js';
+import { createClientForProvider, getConfiguredProviders, getProvider } from '../providers/provider-registry.js';
 import { PayloadGenerator } from '../testing/payload-generator.js';
 import { BypassEngine } from '../testing/bypass-engine.js';
 import { ResponseAnalyzer } from '../testing/response-analyzer.js';
@@ -52,8 +54,9 @@ function truncateResult(obj, maxLen = MAX_TOOL_RESULT_LENGTH) {
  * @param {string} [options.model='gpt-4o'] - Model identifier
  * @param {number} [options.maxRetries=3] - Max API retries
  * @param {import('openai').default} [options.client] - Pre-configured OpenAI SDK client
- * @param {string} [options.providerName] - Provider key (openai, deepseek, qwen, github, google)
+ * @param {string} [options.providerName] - Provider key (openai, deepseek, qwen, qwen-portal, github, google, copilot)
  * @param {object} [options.providerConfig] - Stored provider config (apiKey, baseURL, token, etc.)
+ * @param {Array<{name: string, model: string}>} [options.fallbackProviders] - Fallback providers to try on quota exhaustion
  */
 export async function executeExploitationAgent(
   promptTemplate,
@@ -62,11 +65,13 @@ export async function executeExploitationAgent(
   outputDir,
   options = {}
 ) {
-  const model = options.model || 'gpt-4o';
+  let model = options.model || 'gpt-4o';
   const maxRetries = options.maxRetries || 3;
-  const llmClient = options.client || new OpenAI();
-  const providerName = options.providerName || 'openai';
+  let llmClient = options.client || new OpenAI();
+  let providerName = options.providerName || 'openai';
   const providerConfig = options.providerConfig || {};
+  const fallbackProviders = options.fallbackProviders || [];
+  let fallbackUsed = false;
   const rateLimiter = new RateLimiter({ maxRetries, enableLogging: true });
   
   console.log(chalk.cyan(`🚀 Starting exploitation agent (${model})...`));
@@ -774,13 +779,42 @@ COMPLETION:
   let evidenceSavedCount = 0; // Track how many vulnerabilities have been tested
   let lastEvidenceTurn = 0; // Track when last evidence was saved (stall detection)
   let httpRequestsSinceLastEvidence = 0; // Track HTTP requests between save_evidence calls
+  let toolChoiceSupported = true; // Set to false if provider rejects tool_choice: "required"
+  const failedModelsByProvider = new Map();
+
+  function _recordModelFailure(providerKey, modelId) {
+    if (!modelId) return;
+    if (!failedModelsByProvider.has(providerKey)) {
+      failedModelsByProvider.set(providerKey, new Set());
+    }
+    failedModelsByProvider.get(providerKey).add(modelId);
+  }
+
+  function _getNextModelForProvider(providerKey, currentModel) {
+    try {
+      const provider = getProvider(providerKey);
+      const models = provider.getModels().map((m) => m.id).filter(Boolean);
+      if (models.length === 0) return null;
+
+      const failed = failedModelsByProvider.get(providerKey) || new Set();
+      const remaining = models.filter((id) => !failed.has(id));
+      if (remaining.length === 0) return null;
+
+      const next = remaining.find((id) => id !== currentModel) || remaining[0];
+      return next === currentModel ? null : next;
+    } catch (e) {
+      console.log(chalk.gray(`   Model cycling failed: ${e.message}`));
+      return null;
+    }
+  }
 
   try {
     while (turnCount < maxTurns) {
       console.log(chalk.blue(`\n🤖 Turn ${turnCount + 1}:`));
 
       // Force tool use until evidence has been saved; use 'auto' once testing has started
-      let effectiveToolChoice = (evidenceSavedCount === 0) ? 'required' : 'auto';
+      // Some providers (e.g. qwen-portal in thinking mode) reject tool_choice: "required"
+      let effectiveToolChoice = (evidenceSavedCount === 0 && toolChoiceSupported) ? 'required' : 'auto';
 
       // Use rate limiter for API call with retry logic
       let response;
@@ -803,10 +837,11 @@ COMPLETION:
         turnCount++;
         consecutiveErrors = 0; // Reset on success
       } catch (apiError) {
-        // If 'required' tool_choice is not supported, fall back to 'auto'
+        // If 'required' tool_choice is not supported, fall back to 'auto' permanently
         if (effectiveToolChoice === 'required' && 
             (apiError.message?.includes('tool_choice') || apiError.status === 400)) {
           console.log(chalk.yellow(`   ⚠️ tool_choice "required" not supported — falling back to "auto"`));
+          toolChoiceSupported = false;
           effectiveToolChoice = 'auto';
           try {
             response = await rateLimiter.executeWithRetry(
@@ -853,8 +888,59 @@ COMPLETION:
             break;
           }
 
+          // --- Model cycling and provider fallback ---
+          // For 404 model-not-found errors, try a different model on the SAME provider
+          // before falling back to a different provider.
+          const isQuota = isRateLimitError(apiError);
+          const isModelMissing = isModelNotFoundError(apiError);
+
+          if (isModelMissing) {
+            _recordModelFailure(providerName, model);
+            const nextModel = _getNextModelForProvider(providerName, model);
+            if (nextModel) {
+              console.log(chalk.yellow(`   ⚠️ Model "${model}" not accessible on ${providerName}. Trying ${nextModel}...`));
+              model = nextModel;
+              payloadGenerator.model = nextModel;
+              consecutiveErrors = 0;
+              continue; // Retry the same turn with a new model
+            }
+
+            console.log(chalk.yellow(`   ⚠️ No accessible models left on ${providerName}.`));
+          }
+
+          // Try immediately for rate-limit/quota errors (the rate limiter already
+          // retried internally, so if it's still 429 the quota is genuinely gone).
+          // Also try immediately for model-not-found errors when no models remain.
+          // For non-quota errors, wait until consecutiveErrors reaches the threshold.
+          const shouldTryFallback = isQuota || isModelMissing || consecutiveErrors >= maxConsecutiveErrors;
+
+          if (shouldTryFallback && !fallbackUsed && fallbackProviders.length > 0 && (isQuota || isModelMissing)) {
+            let swapped = false;
+            for (const fb of fallbackProviders) {
+              if (fb.name === providerName) continue; // skip current provider
+              try {
+                const reason = isModelMissing
+                  ? `Model "${model}" not accessible on ${providerName}`
+                  : `Provider quota exhausted (${providerName})`;
+                console.log(chalk.yellow(`\n   ⚡ ${reason}. Falling back to ${fb.name}...`));
+                llmClient = await createClientForProvider(fb.name);
+                const fbProvider = getProvider(fb.name);
+                model = fb.model || fbProvider.getDefaultModel();
+                providerName = fb.name;
+                fallbackUsed = true;
+                consecutiveErrors = 0;
+                toolChoiceSupported = true; // Reset for new provider
+                swapped = true;
+                console.log(chalk.green(`   ✅ Switched to ${fb.name}/${model}`));
+                break;
+              } catch (fbError) {
+                console.log(chalk.gray(`   Fallback ${fb.name} failed: ${fbError.message}`));
+              }
+            }
+            if (swapped) continue; // Retry the turn with the new provider
+          }
+
           if (consecutiveErrors >= maxConsecutiveErrors) {
-            const isQuota = isRateLimitError(apiError);
             console.log(chalk.red(`\n   ❌ Too many consecutive errors (${maxConsecutiveErrors}), stopping agent`));
             if (isQuota) {
               console.log(chalk.yellow(`\n   Provider quota exhausted (${providerName}). Possible actions:`));
@@ -862,11 +948,17 @@ COMPLETION:
               console.log(chalk.yellow(`      • Switch to a different provider: node src/main.js auth login`));
               console.log(chalk.yellow(`      • Check your quota/billing at the provider dashboard`));
             }
+            if (isModelMissing) {
+              console.log(chalk.yellow(`\n   Model "${model}" is not accessible on ${providerName}. Possible actions:`));
+              console.log(chalk.yellow(`      • Try a different model: re-run and select another model`));
+              console.log(chalk.yellow(`      • Switch to a different provider: node src/main.js auth login`));
+              console.log(chalk.yellow(`      • Check your plan at the provider dashboard`));
+            }
             break;
           }
           
-          // If rate limit, add extra cooldown
-          if (isRateLimitError(apiError)) {
+          // If rate limit but no fallback available, add extra cooldown
+          if (isQuota) {
             const cooldown = 60000; // 1 minute cooldown
             console.log(chalk.yellow(`   ⏳ Rate limit cooldown: waiting ${formatDelay(cooldown)}...`));
             await sleep(cooldown);

@@ -2,6 +2,7 @@ import chalk from 'chalk';
 import {
   isRetryableError,
   isRateLimitError,
+  isModelNotFoundError,
   getRetryDelay,
   formatDelay,
   sleep,
@@ -311,6 +312,7 @@ export class RateLimiter {
 export {
   isRetryableError,
   isRateLimitError,
+  isModelNotFoundError,
   getRetryDelay,
   formatDelay,
   sleep,

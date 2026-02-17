@@ -117,6 +117,27 @@ export function isRateLimitError(error) {
 }
 
 /**
+ * Check if error is a "model not found" 404 — the model ID does not exist
+ * or the user's plan does not have access to it.
+ * This is distinct from a generic 404 (e.g. wrong endpoint URL).
+ *
+ * @param {Error} error - The error to check
+ * @returns {boolean} True if this is a model-not-found error
+ */
+export function isModelNotFoundError(error) {
+  const message = (error.message || '').toLowerCase();
+  const status = error.status || error.statusCode;
+
+  if (status === 404 && /does not exist|do not have access/i.test(error.message || '')) {
+    return true;
+  }
+
+  // Message fallback — OpenAI's exact wording
+  return /model.*does not exist/i.test(message) ||
+         /do not have access to/i.test(message);
+}
+
+/**
  * Check if an error is a server error (5xx)
  * @param {Error} error - The error to check
  * @returns {boolean} True if this is a server error

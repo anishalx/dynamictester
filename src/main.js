@@ -248,7 +248,7 @@ async function main() {
   // ------------------------------------------------------------------
   // Prompt 4: Provider and model selection
   // ------------------------------------------------------------------
-  const { providerName, modelId, client, providerConfig } = await selectProviderAndModel();
+  const { providerName, modelId, client, providerConfig, fallbackProviders } = await selectProviderAndModel();
 
   // Parse comma-separated paths
   const resultPaths = resultJsonPath.split(',').map(p => p.trim());
@@ -342,7 +342,7 @@ async function main() {
             queuePath,
             targetUrl,
             outputDir,
-            { model: modelId, client, providerName, providerConfig }
+            { model: modelId, client, providerName, providerConfig, fallbackProviders }
           );
           
           if (result.success) {
@@ -422,11 +422,22 @@ async function main() {
  * backward-compatible env-var fallback, CLI flag overrides,
  * and validates stored default models.
  *
- * @returns {Promise<{providerName: string, modelId: string, client: import('openai').default, providerConfig: object}>}
+ * @returns {Promise<{providerName: string, modelId: string, client: import('openai').default, providerConfig: object, fallbackProviders: Array<{name: string, model: string}>}>}
  */
 async function selectProviderAndModel() {
   const config = await loadConfig();
   const configured = await getConfiguredProviders();
+
+  /**
+   * Build a fallback list from all configured providers except the chosen one.
+   * @param {string} chosenName - Provider being used as primary
+   * @returns {Array<{name: string, model: string}>}
+   */
+  function buildFallbacks(chosenName) {
+    return configured
+      .filter(p => p.name !== chosenName)
+      .map(p => ({ name: p.name, model: p.getDefaultModel() }));
+  }
 
   // If nothing configured and OPENAI_API_KEY is set, auto-use OpenAI
   if (configured.length === 0 && process.env.OPENAI_API_KEY) {
@@ -434,7 +445,7 @@ async function selectProviderAndModel() {
     const provider = getProvider('openai');
     const providerConfig = { apiKey: process.env.OPENAI_API_KEY };
     const client = provider.createClient(providerConfig);
-    return { providerName: 'openai', modelId: cliModel || 'gpt-4o', client, providerConfig };
+    return { providerName: 'openai', modelId: cliModel || 'gpt-4o', client, providerConfig, fallbackProviders: buildFallbacks('openai') };
   }
 
   if (configured.length === 0) {
@@ -457,7 +468,7 @@ async function selectProviderAndModel() {
     const client = await createClientForProvider(cliProvider);
     const modelId = cliModel || provider.getDefaultModel();
     console.log(chalk.gray(`\nUsing CLI override: ${cliProvider}/${modelId}`));
-    return { providerName: cliProvider, modelId, client, providerConfig };
+    return { providerName: cliProvider, modelId, client, providerConfig, fallbackProviders: buildFallbacks(cliProvider) };
   }
 
   let providerName;
@@ -488,7 +499,7 @@ async function selectProviderAndModel() {
         if (useDefault) {
           const providerConfig = await getProviderConfig(config.defaultProvider);
           const client = await createClientForProvider(config.defaultProvider);
-          return { providerName: config.defaultProvider, modelId: config.defaultModel, client, providerConfig };
+          return { providerName: config.defaultProvider, modelId: config.defaultModel, client, providerConfig, fallbackProviders: buildFallbacks(config.defaultProvider) };
         }
       } else {
         console.log(chalk.yellow(`\nStored default model "${config.defaultModel}" is no longer valid for ${config.defaultProvider}.`));
@@ -536,7 +547,7 @@ async function selectProviderAndModel() {
 
   const providerConfig = await getProviderConfig(providerName);
   const client = await createClientForProvider(providerName);
-  return { providerName, modelId, client, providerConfig };
+  return { providerName, modelId, client, providerConfig, fallbackProviders: buildFallbacks(providerName) };
 }
 
 // ---------------------------------------------------------------------------
