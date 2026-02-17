@@ -16,7 +16,8 @@ import {
   getProvider,
   getAllProviders,
   getConfiguredProviders,
-  createClientForProvider
+  createClientForProvider,
+  isValidProvider
 } from './providers/provider-registry.js';
 import {
   loadConfig,
@@ -558,29 +559,35 @@ async function selectProviderAndModel() {
   } else {
     // Check for stored default
     if (config.defaultProvider && config.defaultModel) {
-      // Validate that the stored default model is still valid
-      const defaultProvider = getProvider(config.defaultProvider);
-      const isValid = defaultProvider.isValidModel
-        ? defaultProvider.isValidModel(config.defaultModel)
-        : true; // Providers without isValidModel are assumed valid
-
-      if (isValid) {
-        const { useDefault } = await inquirer.prompt([
-          {
-            type: 'confirm',
-            name: 'useDefault',
-            message: `Use default provider ${config.defaultProvider}/${config.defaultModel}?`,
-            default: true
-          }
-        ]);
-        if (useDefault) {
-          const providerConfig = await getProviderConfig(config.defaultProvider);
-          const client = await createClientForProvider(config.defaultProvider);
-          return { providerName: config.defaultProvider, modelId: config.defaultModel, client, providerConfig, fallbackProviders: buildFallbacks(config.defaultProvider) };
-        }
+      if (!isValidProvider(config.defaultProvider)) {
+        console.log(chalk.yellow(`\nStored default provider "${config.defaultProvider}" is no longer available.`));
+        console.log(chalk.gray('Available providers: ' + getAllProviders().map(p => p.name).join(', ')));
+        console.log(chalk.gray('Please select a new provider.\n'));
       } else {
-        console.log(chalk.yellow(`\nStored default model "${config.defaultModel}" is no longer valid for ${config.defaultProvider}.`));
-        console.log(chalk.gray('Please select a new model.\n'));
+        // Validate that the stored default model is still valid
+        const defaultProvider = getProvider(config.defaultProvider);
+        const isValid = defaultProvider.isValidModel
+          ? defaultProvider.isValidModel(config.defaultModel)
+          : true; // Providers without isValidModel are assumed valid
+
+        if (isValid) {
+          const { useDefault } = await inquirer.prompt([
+            {
+              type: 'confirm',
+              name: 'useDefault',
+              message: `Use default provider ${config.defaultProvider}/${config.defaultModel}?`,
+              default: true
+            }
+          ]);
+          if (useDefault) {
+            const providerConfig = await getProviderConfig(config.defaultProvider);
+            const client = await createClientForProvider(config.defaultProvider);
+            return { providerName: config.defaultProvider, modelId: config.defaultModel, client, providerConfig, fallbackProviders: buildFallbacks(config.defaultProvider) };
+          }
+        } else {
+          console.log(chalk.yellow(`\nStored default model "${config.defaultModel}" is no longer valid for ${config.defaultProvider}.`));
+          console.log(chalk.gray('Please select a new model.\n'));
+        }
       }
     }
 
