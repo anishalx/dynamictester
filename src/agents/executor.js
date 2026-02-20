@@ -36,6 +36,33 @@ const DEFAULT_STAGGER_DELAY = 2000;
 // Default max retries for parallel agent execution
 const DEFAULT_PARALLEL_RETRIES = 3;
 
+// Base delay (ms) between successful API turns to prevent rate limiting
+const DEFAULT_TURN_DELAY = 2000;
+
+// Delay (ms) for free-tier models (more aggressive rate limits)
+const FREE_TIER_TURN_DELAY = 15000;
+
+// Multiplier applied to turn delay after recovering from a rate limit error
+const POST_RATE_LIMIT_DELAY_MULTIPLIER = 3;
+
+// Maximum turn delay (ms) to prevent excessively long waits
+const MAX_TURN_DELAY = 60000;
+
+/**
+ * Detect if a model is a free-tier model that needs aggressive rate limiting.
+ * Free-tier models on OpenRouter end with ":free".
+ * @param {string} modelId - The model identifier
+ * @returns {boolean} True if the model is free-tier
+ */
+function isFreeTierModel(modelId) {
+  if (!modelId) return false;
+  // OpenRouter free-tier models end with ":free"
+  if (modelId.endsWith(':free')) return true;
+  // OpenRouter free-tier models may also have "(free)" in the name
+  if (modelId.toLowerCase().includes('(free)')) return true;
+  return false;
+}
+
 /**
  * Prune old messages from the conversation to prevent context window overflow.
  * Keeps the system message, a summary of older context, and the most recent messages.
@@ -103,7 +130,7 @@ function truncateResult(obj, maxLen = MAX_TOOL_RESULT_LENGTH) {
  * @param {string} [options.model='gpt-4o'] - Model identifier
  * @param {number} [options.maxRetries=3] - Max API retries
  * @param {import('openai').default} [options.client] - Pre-configured OpenAI SDK client
- * @param {string} [options.providerName] - Provider key (openai, deepseek, qwen, copilot, google)
+ * @param {string} [options.providerName] - Provider key (openai, deepseek, qwen, copilot, google, openrouter, nvidia)
  * @param {object} [options.providerConfig] - Stored provider config (apiKey, baseURL, token, etc.)
  * @param {Array<{name: string, model: string}>} [options.fallbackProviders] - Fallback providers to try on quota exhaustion
  */
@@ -115,16 +142,18 @@ export async function executeExploitationAgent(
   options = {}
 ) {
   let model = options.model || 'gpt-4o';
-  const maxRetries = options.maxRetries ?? 3;
+  const maxRetries = options.maxRetries ?? 5;
   let llmClient = options.client || new OpenAI();
   let providerName = options.providerName || 'openai';
   const providerConfig = options.providerConfig || {};
   const fallbackProviders = options.fallbackProviders || [];
   const triedProviders = new Set(); // Track which providers have been tried for fallback
   const rateLimiter = new RateLimiter({ maxRetries, enableLogging: true });
+  const initialTurnDelay = isFreeTierModel(model) ? FREE_TIER_TURN_DELAY : DEFAULT_TURN_DELAY;
   
   console.log(chalk.cyan(`🚀 Starting exploitation agent (${model})...`));
   console.log(chalk.gray(`   Rate limit handling: ${maxRetries} retries with exponential backoff`));
+  console.log(chalk.gray(`   Inter-turn delay: ${formatDelay(initialTurnDelay)}${isFreeTierModel(model) ? ' (free-tier model detected)' : ''}`));
   
   // Load prompt template
   let systemPrompt = await fs.readFile(promptTemplate, 'utf8');
@@ -224,7 +253,7 @@ COMPLETION:
   // ---------------------------------------------------------------------------
   // Initialize Playwright browser for dynamic testing
   // ---------------------------------------------------------------------------
-  const browserManager = new BrowserManager();
+  const browserManager = new BrowserManager({ targetUrl });
   
   // Initialize testing utilities (shared across all tool calls within this agent)
   const payloadGenerator = new PayloadGenerator(model);
@@ -875,6 +904,8 @@ COMPLETION:
   let lastEvidenceTurn = 0; // Track when last evidence was saved (stall detection)
   let httpRequestsSinceLastEvidence = 0; // Track HTTP requests between save_evidence calls
   let toolChoiceSupported = true; // Set to false if provider rejects tool_choice: "required"
+  // Proactive pacing: delay between turns to prevent rate limits
+  let turnDelay = isFreeTierModel(model) ? FREE_TIER_TURN_DELAY : DEFAULT_TURN_DELAY;
   const failedModelsByProvider = new Map();
 
   function _recordModelFailure(providerKey, modelId) {
@@ -905,6 +936,11 @@ COMPLETION:
 
   try {
     while (turnCount < maxTurns) {
+      // Proactive pacing: delay between turns to avoid hitting rate limits
+      if (turnCount > 0) {
+        await sleep(turnDelay);
+      }
+
       // Prune messages if context is growing too large
       if (messages.length > MAX_MESSAGES_BEFORE_PRUNE) {
         const before = messages.length;
@@ -931,7 +967,7 @@ COMPLETION:
               tools: tools,
               tool_choice: effectiveToolChoice,
               max_tokens: 4096,
-              temperature: 0.2,
+              temperature: 0.2
             });
           },
           `${providerName} API request (turn ${turnCount + 1})`,
@@ -940,10 +976,16 @@ COMPLETION:
         // Only count the turn after a successful API response
         turnCount++;
         consecutiveErrors = 0; // Reset on success
+        // Gradually reduce elevated turn delay after consecutive successes
+        const baseTurnDelay = isFreeTierModel(model) ? FREE_TIER_TURN_DELAY : DEFAULT_TURN_DELAY;
+        if (turnDelay > baseTurnDelay) {
+          turnDelay = Math.max(Math.round(turnDelay * 0.8), baseTurnDelay);
+        }
       } catch (apiError) {
         // If 'required' tool_choice is not supported, fall back to 'auto' permanently
-        if (effectiveToolChoice === 'required' && 
-            (apiError.message?.includes('tool_choice') || apiError.status === 400)) {
+        if (effectiveToolChoice === 'required' &&
+            (apiError.status === 400 || apiError.message?.includes('tool_choice') ||
+             /unsupported|invalid.*param|not.*support/i.test(apiError.message || ''))) {
           console.log(chalk.yellow(`   ⚠️ tool_choice "required" not supported — falling back to "auto"`));
           toolChoiceSupported = false;
           effectiveToolChoice = 'auto';
@@ -956,7 +998,7 @@ COMPLETION:
                   tools: tools,
                   tool_choice: 'auto',
                   max_tokens: 4096,
-                  temperature: 0.2,
+                  temperature: 0.2
                 });
               },
               `${providerName} API request fallback (turn ${turnCount + 1})`,
@@ -1035,6 +1077,8 @@ COMPLETION:
                 payloadGenerator.model = model; // Keep payload generator in sync
                 consecutiveErrors = 0;
                 toolChoiceSupported = true; // Reset for new provider
+                // Reset turn delay for new provider, with free-tier detection
+                turnDelay = isFreeTierModel(model) ? FREE_TIER_TURN_DELAY : DEFAULT_TURN_DELAY;
                 swapped = true;
                 console.log(chalk.green(`   ✅ Switched to ${fb.name}/${model}`));
                 break;
@@ -1068,6 +1112,9 @@ COMPLETION:
             const cooldown = 60000; // 1 minute cooldown
             console.log(chalk.yellow(`   ⏳ Rate limit cooldown: waiting ${formatDelay(cooldown)}...`));
             await sleep(cooldown);
+            // Increase turn delay after rate limit to prevent re-triggering
+            turnDelay = Math.min(turnDelay * POST_RATE_LIMIT_DELAY_MULTIPLIER, MAX_TURN_DELAY);
+            console.log(chalk.gray(`   Turn delay increased to ${formatDelay(turnDelay)}`));
           }
           
           continue; // Try next turn

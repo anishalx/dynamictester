@@ -26,6 +26,17 @@ export class BrowserManager {
     this._externallyManaged = !!(options.page || options.context);
     this.authManager = getAuthManager();
     this._initPromise = null; // Guard against concurrent ensureBrowser() calls
+
+    // Store the user-specified target URL so SSRF checks can whitelist it.
+    // Without this, requests to localhost / private IPs are blocked even when
+    // the user explicitly chose that host as the testing target.
+    this._allowedTargetHost = null;
+    if (options.targetUrl) {
+      try {
+        const parsed = new URL(options.targetUrl);
+        this._allowedTargetHost = parsed.host; // includes port, e.g. "localhost:3000"
+      } catch (e) { /* invalid targetUrl — ignore, SSRF checks remain strict */ }
+    }
   }
 
   async ensureBrowser() {
@@ -613,7 +624,7 @@ export class BrowserManager {
   async httpRequest({ url, method = 'GET', headers = {}, body = null, contentType = 'application/json', useAuth = true }) {
     try {
       // Validate URL to prevent SSRF against internal/private networks
-      const ssrfCheck = BrowserManager._validateUrlForSSRF(url);
+      const ssrfCheck = BrowserManager._validateUrlForSSRF(url, this._allowedTargetHost);
       if (!ssrfCheck.safe) {
         return { status: 'error', message: `SSRF protection: ${ssrfCheck.reason}`, url };
       }
@@ -747,12 +758,15 @@ export class BrowserManager {
   /**
    * Validate a URL to prevent SSRF attacks against internal/private networks.
    * Blocks requests to private IPs, loopback, link-local, and metadata endpoints.
+   * If allowedHost is provided (from the user-specified target URL), requests to
+   * that exact host:port are permitted even if they resolve to a private address.
    *
    * @param {string} urlStr - URL to validate
+   * @param {string|null} [allowedHost=null] - Whitelisted host (e.g. "localhost:3000")
    * @returns {{ safe: boolean, reason?: string }}
    * @private
    */
-  static _validateUrlForSSRF(urlStr) {
+  static _validateUrlForSSRF(urlStr, allowedHost = null) {
     let parsed;
     try {
       parsed = new URL(urlStr);
@@ -763,6 +777,12 @@ export class BrowserManager {
     // Only allow http and https protocols
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       return { safe: false, reason: `Protocol "${parsed.protocol}" is not allowed` };
+    }
+
+    // If this host matches the user-specified target, allow it through.
+    // parsed.host includes the port (e.g. "localhost:3000"), so this is strict.
+    if (allowedHost && parsed.host === allowedHost) {
+      return { safe: true };
     }
 
     const hostname = parsed.hostname;

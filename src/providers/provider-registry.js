@@ -3,6 +3,8 @@ import { DeepSeekProvider } from './deepseek-provider.js';
 import { QwenProvider } from './qwen-provider.js';
 import { CopilotProvider } from './copilot-provider.js';
 import { GoogleProvider } from './google-provider.js';
+import { OpenRouterProvider } from './openrouter-provider.js';
+import { NvidiaProvider } from './nvidia-provider.js';
 import { getProviderConfig } from '../config/config-manager.js';
 
 /**
@@ -19,7 +21,9 @@ const PROVIDER_REGISTRY = Object.freeze({
   deepseek: DeepSeekProvider,
   qwen: QwenProvider,
   copilot: CopilotProvider,
-  google: GoogleProvider
+  google: GoogleProvider,
+  openrouter: OpenRouterProvider,
+  nvidia: NvidiaProvider
 });
 
 /**

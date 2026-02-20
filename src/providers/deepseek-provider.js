@@ -79,6 +79,7 @@ export class DeepSeekProvider extends BaseProvider {
     if (!apiKey) {
       throw new Error('DeepSeek API key not found. Run "node src/main.js auth login" or set DEEPSEEK_API_KEY.');
     }
-    return new OpenAI({ apiKey, baseURL: DEEPSEEK_BASE_URL });
+    // Disable SDK built-in retries — our RateLimiter handles retry with proper backoff
+    return new OpenAI({ apiKey, baseURL: DEEPSEEK_BASE_URL, maxRetries: 0 });
   }
 }

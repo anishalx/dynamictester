@@ -81,6 +81,7 @@ export class OpenAIProvider extends BaseProvider {
     if (!apiKey) {
       throw new Error('OpenAI API key not found. Run "node src/main.js auth login" or set OPENAI_API_KEY.');
     }
-    return new OpenAI({ apiKey });
+    // Disable SDK built-in retries — our RateLimiter handles retry with proper backoff
+    return new OpenAI({ apiKey, maxRetries: 0 });
   }
 }

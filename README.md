@@ -2,7 +2,7 @@
 
 **AI-powered DAST tool that bridges static analysis with automated exploitation validation.**
 
-Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL, Gitleaks, OSV, Syft, Noir) and uses LLM agents combined with Playwright browser automation to dynamically test, validate, and produce developer-friendly reports. Supports 5 LLM providers out of the box.
+Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL, Gitleaks, OSV, Syft, Noir) and uses LLM agents combined with Playwright browser automation to dynamically test, validate, and produce developer-friendly reports. Supports 7 LLM providers out of the box.
 
 ---
 
@@ -11,7 +11,7 @@ Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL,
 | Feature | Description |
 |---------|-------------|
 | **Multi-Analyzer Support** | Parses output from 7 static analyzers with auto-detection |
-| **5 LLM Providers** | OpenAI, DeepSeek, Qwen, GitHub Copilot, Google Gemini |
+| **7 LLM Providers** | OpenAI, DeepSeek, Qwen, GitHub Copilot, Google Gemini, OpenRouter, NVIDIA NIM |
 | **20 Agent Tools** | 15 browser tools + 5 exploitation workflow tools |
 | **16 Vulnerability Categories** | Injection, XSS, SSRF, XXE, traversal, auth, secrets, and more |
 | **Content-Based Deduplication** | SHA-256 hashing eliminates duplicate findings across analyzers |
@@ -90,7 +90,7 @@ Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL,
 |                                                                           |
 |  +--------------------------------------------------------------------+  |
 |  |                     Provider Registry                              |  |
-|  |  OpenAI | DeepSeek | Qwen | GitHub Copilot | Gemini             |  |
+|  |  OpenAI | DeepSeek | Qwen | Copilot | Gemini | OpenRouter | NVIDIA |  |
 |  +--------------------------------------------------------------------+  |
 +---------------------------------------------------------------------------+
 ```
@@ -141,6 +141,8 @@ dynamictester/
 │   │   ├── deepseek-provider.js         # DeepSeek (V3, R1)
 │   │   ├── qwen-provider.js             # Qwen / Alibaba Cloud (max, plus, coder, flash, turbo)
 │   │   ├── copilot-provider.js          # GitHub Copilot (GPT-4o, Claude via Copilot subscription)
+│   │   ├── openrouter-provider.js       # OpenRouter (200+ models, free tier available)
+│   │   ├── nvidia-provider.js           # NVIDIA NIM (Kimi K2, DeepSeek, Llama, Nemotron)
 │   │   ├── google-provider.js           # Google Gemini (API key) + Antigravity OAuth
 │   │   ├── antigravity-client.js        # OpenAI-compatible adapter for Antigravity API
 │   │   └── google-oauth.js              # Google OAuth 2.0 + PKCE for Antigravity
@@ -242,7 +244,7 @@ node src/main.js --ci --fail-on-likely
 
 | Flag | Description |
 |------|-------------|
-| `--provider=<name>` | Override LLM provider (`openai`, `deepseek`, `qwen`, `copilot`, `google`) |
+| `--provider=<name>` | Override LLM provider (`openai`, `deepseek`, `qwen`, `copilot`, `google`, `openrouter`, `nvidia`) |
 | `--model=<name>` | Override LLM model (e.g., `gpt-4o`, `gemini-2.5-pro`, `deepseek-chat`) |
 | `--ci` | Enable CI/CD mode -- generate CI report and exit with status code |
 | `--fail-on-likely` | In CI mode, also fail for LIKELY-classified findings |
@@ -327,7 +329,7 @@ Supported analyzers: semgrep, gitleaks, trivy, osv, syft, noir, codeql
 
 ## Auth & Providers
 
-The tool supports 5 LLM providers. All providers expose an OpenAI-compatible client interface, so the exploitation agent works identically regardless of provider.
+The tool supports 7 LLM providers. All providers expose an OpenAI-compatible client interface, so the exploitation agent works identically regardless of provider.
 
 ### Provider Overview
 
@@ -338,6 +340,8 @@ The tool supports 5 LLM providers. All providers expose an OpenAI-compatible cli
 | **Qwen** | `qwen` | `qwen-max` | DashScope API key + region | `DASHSCOPE_API_KEY` |
 | **GitHub Copilot** | `copilot` | `gpt-4o` | GitHub Device Code OAuth | — |
 | **Google Gemini** | `google` | `gemini-2.5-flash` | API key or Antigravity OAuth | `GOOGLE_API_KEY` |
+| **OpenRouter** | `openrouter` | `openai/gpt-4o` | API key | `OPENROUTER_API_KEY` |
+| **NVIDIA NIM** | `nvidia` | `moonshotai/kimi-k2-instruct` | API key (`nvapi-`) | `NVIDIA_API_KEY` |
 
 ### Provider Selection Priority
 
@@ -372,6 +376,10 @@ Provider credentials are stored in `~/.config/dynamictester/config.json`:
 **GitHub Copilot** uses GitHub Device Code OAuth (same flow as VS Code / GitHub CLI). Requires an active GitHub Copilot subscription. Available models are fetched dynamically from the Copilot API.
 
 **Qwen** prompts for a region (International/Singapore, US/Virginia, or China/Beijing) which determines the API endpoint.
+
+**OpenRouter** is a unified API gateway providing access to 200+ models (OpenAI, Anthropic, Google, Meta, Mistral, etc.) through a single API key. Free-tier models are available with the `:free` suffix (e.g. `meta-llama/llama-3.3-70b-instruct:free`). Use `openrouter/free` to auto-select the best available free model. Get your API key from https://openrouter.ai/keys.
+
+**NVIDIA NIM** hosts a wide range of models including Kimi K2, DeepSeek V3.2, Qwen3, Llama 3.3, Nemotron Ultra, and Mistral Large 2. Many models are available on the free tier. The default model (`moonshotai/kimi-k2-instruct`) is a 1T MoE model with 32B active parameters and strong tool-calling support. API keys start with `nvapi-` and can be obtained from https://build.nvidia.com.
 
 ---
 

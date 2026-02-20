@@ -102,6 +102,7 @@ export class QwenProvider extends BaseProvider {
     }
     const region = providerConfig?.region || 'international';
     const baseURL = QWEN_ENDPOINTS[region] || QWEN_ENDPOINTS.international;
-    return new OpenAI({ apiKey, baseURL });
+    // Disable SDK built-in retries — our RateLimiter handles retry with proper backoff
+    return new OpenAI({ apiKey, baseURL, maxRetries: 0 });
   }
 }

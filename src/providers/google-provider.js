@@ -244,7 +244,8 @@ export class GoogleProvider extends BaseProvider {
       // Fall back to environment variables
       const envKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
       if (envKey) {
-        return new OpenAI({ apiKey: envKey, baseURL: GEMINI_BASE_URL });
+        // Disable SDK built-in retries — our RateLimiter handles retry with proper backoff
+        return new OpenAI({ apiKey: envKey, baseURL: GEMINI_BASE_URL, maxRetries: 0 });
       }
       throw new Error('Google credentials not found. Run "node src/main.js auth login".');
     }
@@ -252,7 +253,8 @@ export class GoogleProvider extends BaseProvider {
     if (providerConfig.authMode === 'apikey') {
       return new OpenAI({
         apiKey: providerConfig.apiKey,
-        baseURL: GEMINI_BASE_URL
+        baseURL: GEMINI_BASE_URL,
+        maxRetries: 0
       });
     }
 

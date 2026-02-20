@@ -245,9 +245,11 @@ export class CopilotProvider extends BaseProvider {
         'GitHub Copilot token not found. Run "node src/main.js auth login" and select GitHub Copilot.'
       );
     }
+    // Disable SDK built-in retries — our RateLimiter handles retry with proper backoff
     return new OpenAI({
       apiKey,
-      baseURL: COPILOT_API_BASE_URL
+      baseURL: COPILOT_API_BASE_URL,
+      maxRetries: 0
     });
   }
 
