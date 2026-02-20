@@ -42,6 +42,8 @@ export function parseRetryAfter(error) {
 export function isRetryableError(error) {
   const message = (error.message || '').toLowerCase();
   const status = error.status || error.statusCode;
+  const name = error?.name || error?.constructor?.name || '';
+  const code = error?.code || error?.cause?.code;
 
   // --- Status code checks (most reliable) ---
 
@@ -53,6 +55,12 @@ export function isRetryableError(error) {
 
   // Request timeout
   if (status === 408) return true;
+
+  // Connection errors from OpenAI SDK or fetch
+  if (name === 'APIConnectionError') return true;
+  if (['ECONNRESET', 'ECONNREFUSED', 'ECONNABORTED', 'ENOTFOUND', 'EAI_AGAIN'].includes(code)) {
+    return true;
+  }
 
   // --- Message-based checks (word-boundary regex to avoid false positives) ---
 
@@ -77,9 +85,14 @@ export function isRetryableError(error) {
   // Network errors (these are specific enough to not need word boundaries)
   if (/econnreset/i.test(message) ||
       /econnrefused/i.test(message) ||
+      /econnaborted/i.test(message) ||
+      /enotfound/i.test(message) ||
+      /eai_again/i.test(message) ||
       /etimedout/i.test(message) ||
       /network error/i.test(message) ||
-      /socket hang up/i.test(message)) {
+      /socket hang up/i.test(message) ||
+      /connection error/i.test(message) ||
+      /fetch failed/i.test(message)) {
     return true;
   }
 
@@ -231,6 +244,8 @@ export function classifyError(error) {
 
   const message = (error.message || '').toLowerCase();
   const status = error.status || error.statusCode;
+  const name = error?.name || error?.constructor?.name || '';
+  const code = error?.code || error?.cause?.code;
 
   // Server errors — check both status and message
   if ([500, 502, 503, 504].includes(status) ||
@@ -250,10 +265,17 @@ export function classifyError(error) {
   }
 
   // Network errors
-  if (/\beconnreset\b/i.test(message) ||
+  if (name === 'APIConnectionError' ||
+      ['ECONNRESET', 'ECONNREFUSED', 'ECONNABORTED', 'ENOTFOUND', 'EAI_AGAIN'].includes(code) ||
+      /\beconnreset\b/i.test(message) ||
       /\beconnrefused\b/i.test(message) ||
+      /\beconnaborted\b/i.test(message) ||
+      /\benotfound\b/i.test(message) ||
+      /\beai_again\b/i.test(message) ||
       /network error/i.test(message) ||
-      /socket hang up/i.test(message)) {
+      /socket hang up/i.test(message) ||
+      /connection error/i.test(message) ||
+      /fetch failed/i.test(message)) {
     return 'NETWORK_ERROR';
   }
 

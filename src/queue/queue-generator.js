@@ -90,8 +90,10 @@ export async function generateExploitationQueue(vulnerabilities, outputDir) {
     other: []
   };
   
+  const vulnList = Array.isArray(vulnerabilities) ? vulnerabilities : [];
+
   // Group vulnerabilities by type
-  for (const vuln of vulnerabilities) {
+  for (const vuln of vulnList) {
     const rawType = vuln.type || 'other';
     
     // Guard against prototype pollution — only allow known queue types, route unknown to 'other'

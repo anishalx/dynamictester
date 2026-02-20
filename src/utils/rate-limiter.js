@@ -116,6 +116,10 @@ export class RateLimiter {
     const retryDelay = options.retryDelay ?? this.retryDelay;
     const maxAttempts = options.maxAttempts ?? this.maxRetries;
 
+    if (maxAttempts < 1) {
+      throw new Error(`executeParallelWithStagger: maxAttempts must be >= 1, got ${maxAttempts}`);
+    }
+
     if (this.enableLogging) {
       console.log(chalk.cyan(`\n🚀 Starting ${tasks.length} parallel tasks with ${staggerDelay}ms stagger...`));
     }

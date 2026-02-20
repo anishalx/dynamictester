@@ -31,11 +31,18 @@ let _configMutex = Promise.resolve();
  * @param {function(): Promise<*>} fn
  * @returns {Promise<*>}
  */
-function withConfigLock(fn) {
+async function withConfigLock(fn) {
   const prev = _configMutex;
   let release;
   _configMutex = new Promise((resolve) => { release = resolve; });
-  return prev.then(fn).finally(release);
+  try {
+    await prev;
+  } catch (e) { /* Previous config mutation failed — continue */ }
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
 }
 
 /**

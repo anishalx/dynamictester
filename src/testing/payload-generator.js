@@ -32,7 +32,7 @@ export class PayloadGenerator {
   generatePayloadContext(vulnerability, context, stage = 'confirmation', previousResults = null) {
     const vuln = vulnerability || {};
     const ctx = context || {};
-    const vulnType = vuln.vulnerabilityType || vuln.type || 'other';
+    const vulnType = this.normalizeVulnType(vuln.vulnerabilityType || vuln.type || 'other');
     const stageInstructions = this.getStageInstructions(stage, vulnType);
 
     return {
@@ -46,6 +46,79 @@ export class PayloadGenerator {
   }
 
   /**
+   * Normalize vulnerability type to known payload categories.
+   * @param {string} vulnType
+   * @returns {string}
+   * @private
+   */
+  normalizeVulnType(vulnType) {
+    const normalized = String(vulnType || '').trim();
+    const lower = normalized.toLowerCase();
+
+    if (lower === 'injection') return 'injection';
+    if (lower === 'xss') return 'xss';
+    if (lower === 'ssrf') return 'ssrf';
+    if (lower === 'ssti') return 'ssti';
+    if (lower === 'xxe') return 'xxe';
+    if (lower === 'traversal') return 'traversal';
+    if (lower === 'redirect') return 'redirect';
+    if (lower === 'auth') return 'auth';
+    if (lower === 'secrets') return 'secrets';
+    if (lower === 'deserialization') return 'deserialization';
+    if (lower === 'upload') return 'upload';
+    if (lower === 'access') return 'access';
+    if (lower === 'config') return 'config';
+    if (lower === 'crypto') return 'crypto';
+    if (lower === 'command_injection') return 'command_injection';
+
+    const directMap = {
+      sqli: 'injection',
+      nosqli: 'injection',
+      commandinjection: 'command_injection',
+      codeinjection: 'injection',
+      evalinjection: 'injection',
+      elinjection: 'injection',
+      ldapinjection: 'injection',
+      xpathinjection: 'injection',
+      headerinjection: 'injection',
+      storedxss: 'xss',
+      reflectedxss: 'xss',
+      domxss: 'xss',
+      openredirect: 'redirect',
+      pathtraversal: 'traversal',
+      fileupload: 'upload',
+      idor: 'access',
+      authentication: 'auth',
+      sessionfixation: 'auth',
+      insecuredeserialization: 'deserialization',
+      prototypepollution: 'deserialization',
+      weakcrypto: 'crypto',
+      corsmisconfiguration: 'config',
+      missingsecurityheader: 'config'
+    };
+
+    const collapsed = lower.replace(/[^a-z0-9]/g, '');
+    if (directMap[collapsed]) return directMap[collapsed];
+
+    if (collapsed.includes('sql') || collapsed.includes('sqli')) return 'injection';
+    if (collapsed.includes('xss')) return 'xss';
+    if (collapsed.includes('ssrf')) return 'ssrf';
+    if (collapsed.includes('xxe')) return 'xxe';
+    if (collapsed.includes('ssti')) return 'ssti';
+    if (collapsed.includes('traversal') || collapsed.includes('lfi')) return 'traversal';
+    if (collapsed.includes('redirect')) return 'redirect';
+    if (collapsed.includes('upload')) return 'upload';
+    if (collapsed.includes('access') || collapsed.includes('idor')) return 'access';
+    if (collapsed.includes('auth')) return 'auth';
+    if (collapsed.includes('secret')) return 'secrets';
+    if (collapsed.includes('deserialize') || collapsed.includes('prototype')) return 'deserialization';
+    if (collapsed.includes('crypto')) return 'crypto';
+    if (collapsed.includes('command') && collapsed.includes('inject')) return 'command_injection';
+
+    return 'other';
+  }
+
+  /**
    * Validate and filter payloads produced by the LLM.
    * Call this on the raw LLM output to strip hallucinated / placeholder content.
    *
@@ -53,7 +126,7 @@ export class PayloadGenerator {
    * @returns {Array<string>} Validated payload strings
    */
   validateAndFilter(rawResponse) {
-    const payloads = this.parsePayloadsFromResponse(rawResponse);
+    const payloads = this.parsePayloadsFromResponse(rawResponse || '');
     return payloads;
   }
 
@@ -373,7 +446,20 @@ Goal: Detect misconfiguration`,
 - Check for weak hashing in responses
 - Test for algorithm downgrade
 - Check certificate/TLS configuration
-Goal: Detect cryptographic weakness`
+Goal: Detect cryptographic weakness`,
+
+        upload: `Generate 3-5 payloads to CONFIRM file upload issues:
+- Try uploading executable extensions (php, asp, jsp)
+- Test double extensions (image.jpg.php)
+- Attempt null byte truncation (shell.php%00.jpg)
+- Try content-type spoofing (image/jpeg with script content)
+Goal: Detect if dangerous files can be uploaded and executed`,
+
+        access: `Generate 3-5 payloads to CONFIRM access control issues:
+- Attempt IDOR by changing identifiers (user_id=1, account=2)
+- Access admin endpoints without auth
+- Test missing authorization checks on sensitive actions
+Goal: Detect unauthorized access to protected resources`
       },
 
       fingerprint: {
@@ -454,7 +540,19 @@ Use UNION SELECT or error-based extraction`,
 - Identify algorithms in use
 - Check key lengths
 - Test for timing side-channels
-- Verify randomness sources`
+- Verify randomness sources`,
+
+        upload: `Generate payloads to FINGERPRINT upload handling:
+- Identify allowed file extensions and MIME types
+- Test filename normalization and sanitization
+- Check storage location and access paths
+- Detect antivirus or malware scanning responses`,
+
+        access: `Generate payloads to FINGERPRINT access control:
+- Enumerate protected endpoints and required roles
+- Test role escalation paths
+- Check for predictable object identifiers
+- Identify missing auth on read vs write operations`
       },
 
       exploit: {
@@ -535,7 +633,19 @@ Use UNION SELECT with specific table/column names from fingerprinting`,
 - Forge signatures or tokens
 - Decrypt protected data
 - Perform padding oracle attack
-- Demonstrate algorithm downgrade`
+- Demonstrate algorithm downgrade`,
+
+        upload: `Generate payloads to DEMONSTRATE IMPACT:
+- Upload a web shell or script to prove execution
+- Upload a file that triggers server-side processing
+- Demonstrate stored malware delivery
+- Exfiltrate data via uploaded payload`,
+
+        access: `Generate payloads to DEMONSTRATE IMPACT:
+- Access or modify another user's data
+- Perform privileged actions without authorization
+- Escalate to admin-only operations
+- Extract sensitive data from protected endpoints`
       },
 
       refinement: {
@@ -569,12 +679,13 @@ Use UNION SELECT with specific table/column names from fingerprinting`,
    * @private
    */
   parsePayloadsFromResponse(response) {
+    const responseText = response || '';
     const payloads = [];
 
     // Extract numbered list items
     const numberedPattern = /^\d+\.\s*(.+)$/gm;
     let match;
-    while ((match = numberedPattern.exec(response)) !== null) {
+    while ((match = numberedPattern.exec(responseText)) !== null) {
       const payload = match[1].trim();
       // Remove markdown code block markers if present
       const cleanPayload = payload.replace(/^`+|`+$/g, '').trim();
@@ -586,7 +697,7 @@ Use UNION SELECT with specific table/column names from fingerprinting`,
     // If no numbered list found, try to extract from code blocks
     if (payloads.length === 0) {
       const codeBlockPattern = /```[\w]*\n([\s\S]+?)\n```/g;
-      while ((match = codeBlockPattern.exec(response)) !== null) {
+      while ((match = codeBlockPattern.exec(responseText)) !== null) {
         const lines = match[1].split('\n').filter(line =>
           line.trim() && !line.trim().startsWith('#') && !line.trim().startsWith('//')
         );
@@ -596,7 +707,7 @@ Use UNION SELECT with specific table/column names from fingerprinting`,
 
     // If still nothing, extract lines that look like payloads
     if (payloads.length === 0) {
-      const lines = response.split('\n');
+      const lines = responseText.split('\n');
       for (const line of lines) {
         const trimmed = line.trim();
         if (trimmed &&

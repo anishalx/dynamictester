@@ -146,11 +146,11 @@ export async function generateSarifReport(evidenceDir, outputPath, metadata = {}
         {
           physicalLocation: {
             artifactLocation: {
-              uri: finding.sourceLocation?.file || 'unknown'
+              uri: finding.sourceLocation?.file || finding.file || 'unknown'
             },
             region: {
-              startLine: finding.sourceLocation?.line || 1,
-              startColumn: finding.sourceLocation?.column || 1
+              startLine: finding.sourceLocation?.line || finding.line || 1,
+              startColumn: finding.sourceLocation?.column || finding.column || 1
             }
           }
         }
@@ -204,8 +204,10 @@ function generateSarifMessage(finding) {
   const statusIcon = classification === 'CONFIRMED' ? '✓ CONFIRMED' :
                      classification === 'LIKELY' ? '? LIKELY' :
                      classification === 'BLOCKED' ? '⊘ BLOCKED' : '○ NOT REPRODUCIBLE';
-  const location = finding.sourceLocation?.file
-    ? `${finding.sourceLocation.file}:${finding.sourceLocation.line}`
+  const locationFile = finding.sourceLocation?.file || finding.file;
+  const locationLine = finding.sourceLocation?.line || finding.line;
+  const location = locationFile
+    ? `${locationFile}:${locationLine || 0}`
     : 'Unknown location';
   const level = finding.level != null ? ` (Level ${finding.level})` : '';
 
@@ -536,7 +538,7 @@ function generateFindingHtml(finding) {
       </div>
 
       <div class="location">
-        ${escapeHtml(finding.sourceLocation?.file || 'Unknown')}:${escapeHtml(String(finding.sourceLocation?.line || '?'))}:${escapeHtml(String(finding.sourceLocation?.column || '?'))}
+        ${escapeHtml(finding.sourceLocation?.file || finding.file || 'Unknown')}:${escapeHtml(String(finding.sourceLocation?.line || finding.line || '?'))}:${escapeHtml(String(finding.sourceLocation?.column || finding.column || '?'))}
       </div>
 
       <div class="details">

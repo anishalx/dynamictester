@@ -295,10 +295,11 @@ async function waitForCallbackWithFallback(state) {
   // Start the local callback server
   let serverCloseRef = null;
 
-  const callbackPromise = waitForCallback(state).then((result) => {
+  const callbackPromise = (async () => {
+    const result = await waitForCallback(state);
     serverCloseRef = result.closeServer;
     return { source: 'server', code: result.code, closeServer: result.closeServer };
-  });
+  })();
 
   // Capture server close ref from the promise's internal server via a side-channel:
   // waitForCallback will either resolve (setting serverCloseRef) or reject/timeout.

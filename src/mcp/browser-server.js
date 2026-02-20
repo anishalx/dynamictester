@@ -10,7 +10,7 @@ const DEFAULT_TIMEOUT = 5000; // 5 seconds default timeout (reduced from 8s)
  *
  * Supports two modes:
  * 1. Self-managed: Launches its own Chromium browser (default, original behavior).
- * 2. Externally-managed: Receives page/context from Stagehand (or any external source).
+ * 2. Externally-managed: Receives page/context from an external source.
  *    In this mode, ensureBrowser() is a no-op and close() does NOT close the browser.
  *
  * @param {object} [options]
@@ -40,7 +40,7 @@ export class BrowserManager {
   }
 
   async ensureBrowser() {
-    // If externally managed (e.g. Stagehand), skip browser launch
+    // If externally managed, skip browser launch
     if (this._externallyManaged && this.page) {
       return;
     }
@@ -141,8 +141,8 @@ export class BrowserManager {
   }
 
   async navigate({ url }) {
-    await this.ensureBrowser();
     try {
+      await this.ensureBrowser();
       await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
       // Wait a bit for SPA content to render
       await this.page.waitForTimeout(1000);
@@ -554,7 +554,7 @@ export class BrowserManager {
         if (typeof this.context.cookies === 'function') {
           cookies = await this.context.cookies();
         } else if (this.page) {
-          // Fallback: parse document.cookie for Stagehand/V3Context
+          // Fallback: parse document.cookie for external context
           const cookieStr = await this.page.evaluate(() => document.cookie).catch(() => '');
           if (cookieStr) {
             cookies = cookieStr.split(';').map(c => {
@@ -636,7 +636,7 @@ export class BrowserManager {
       let cookieHeader = '';
       if (this.context) {
         try {
-          // Playwright BrowserContext has .cookies(); Stagehand V3Context does not.
+          // Playwright BrowserContext has .cookies(); external contexts may not.
           if (typeof this.context.cookies === 'function') {
             const cookies = await this.context.cookies();
             if (cookies.length > 0) {
@@ -740,7 +740,7 @@ export class BrowserManager {
 
   async close() {
     if (this._externallyManaged) {
-      // Do NOT close the browser — Stagehand owns the lifecycle
+      // Do NOT close the browser — external owner controls lifecycle
       this.page = null;
       this.context = null;
       this.browser = null;

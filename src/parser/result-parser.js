@@ -65,9 +65,23 @@ export async function parseStaticAnalysisResults(resultPath) {
       }
 
       // Deduplicate before adding to results (incremental Set, not rebuilt each file)
-      const uniqueVulns = vulnerabilities.filter(v => !existingIds.has(v.id));
-      for (const v of uniqueVulns) existingIds.add(v.id);
-      const duplicateCount = vulnerabilities.length - uniqueVulns.length;
+      const uniqueVulns = [];
+      let duplicateCount = 0;
+      for (const vuln of vulnerabilities) {
+        const rawId = vuln?.id;
+        const id = typeof rawId === 'string' ? rawId.trim() : rawId;
+        const hasId = id !== undefined && id !== null && id !== '';
+        if (!hasId) {
+          uniqueVulns.push(vuln);
+          continue;
+        }
+        if (existingIds.has(id)) {
+          duplicateCount++;
+          continue;
+        }
+        existingIds.add(id);
+        uniqueVulns.push(vuln);
+      }
       
       if (duplicateCount > 0) {
         console.log(chalk.yellow(`   ⚠️  Skipped ${duplicateCount} duplicate(s)`));

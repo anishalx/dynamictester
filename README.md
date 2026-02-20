@@ -12,7 +12,7 @@ Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL,
 |---------|-------------|
 | **Multi-Analyzer Support** | Parses output from 7 static analyzers with auto-detection |
 | **7 LLM Providers** | OpenAI, DeepSeek, Qwen, GitHub Copilot, Google Gemini, OpenRouter, NVIDIA NIM |
-| **25 Agent Tools** | 15 browser + 4 Stagehand AI + 6 exploitation workflow tools |
+| **21 Agent Tools** | 15 browser + 6 exploitation workflow tools |
 | **16 Vulnerability Categories** | Injection, XSS, SSRF, XXE, traversal, auth, secrets, and more |
 | **Content-Based Deduplication** | SHA-256 hashing eliminates duplicate findings across analyzers |
 | **4-Class Classification** | CONFIRMED / LIKELY / BLOCKED / NOT_REPRODUCIBLE |
@@ -39,7 +39,6 @@ Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL,
 - [Supported Analyzers](#supported-analyzers)
 - [Agent Tools](#agent-tools)
   - [Browser Tools](#browser-tools-15)
-  - [Stagehand AI Browser Tools](#stagehand-ai-browser-tools-4)
   - [Exploitation Workflow Tools](#exploitation-workflow-tools-6)
 - [Classification System](#classification-system)
 - [Output & Reports](#output--reports)
@@ -92,14 +91,6 @@ Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL,
 |  | Injection   |                   | 5-Level Proof    |                   |
 |  +-------------+                   +------------------+                   |
 |                                             |                             |
-|                                    +--------v---------+                   |
-|                                    | Stagehand AI     |                   |
-|                                    |  (4 tools)       |                   |
-|                                    |                  |                   |
-|                                    | AI Act/Extract   |                   |
-|                                    | Observe/Agent    |                   |
-|                                    | Zod Schemas      |                   |
-|                                    +------------------+                   |
 |                                                                           |
 |  +--------------------------------------------------------------------+  |
 |  |                     Provider Registry                              |  |
@@ -130,7 +121,6 @@ dynamictester/
 │   │
 │   ├── mcp/
 │   │   ├── browser-server.js            # BrowserManager — 15 Playwright tools for the LLM
-│   │   └── stagehand-manager.js         # StagehandManager — 4 AI-powered browser tools (act, extract, observe, agent)
 │   │
 │   ├── parser/
 │   │   ├── normalizer.js                # Severity/confidence normalization, SHA-256 dedup, 18+ categories
@@ -452,32 +442,6 @@ Playwright-based browser automation exposed to the LLM agent:
 | `browser_get_auth_status` | Check stored auth tokens |
 | `browser_clear_auth` | Clear all stored auth tokens |
 
-### Stagehand AI Browser Tools (4)
-
-AI-powered browser automation via [@browserbasehq/stagehand](https://github.com/browserbasehq/stagehand). These tools use natural language instead of CSS selectors, making them self-healing and resilient to UI changes. Stagehand owns the browser lifecycle and exposes Playwright via Chrome DevTools Protocol for full API compatibility.
-
-| Tool | Description |
-|------|-------------|
-| `stagehand_act` | Execute browser actions via natural language (e.g., "click the login button", "fill in the email field with test@example.com") |
-| `stagehand_extract` | Extract structured data from pages using AI with predefined Zod schemas |
-| `stagehand_observe` | Discover available actions and interactive elements on the current page |
-| `stagehand_agent` | Execute complex multi-step browser workflows autonomously (max 10 steps) |
-
-**Predefined extraction schemas** for `stagehand_extract`:
-
-| Schema | Fields Extracted |
-|--------|-----------------|
-| `form_fields` | name, type, required, placeholder, current value |
-| `error_messages` | message, type (validation/auth/server/general) |
-| `links` | text, href, type (navigation/external/api/anchor) |
-| `api_endpoints` | url, method, description |
-| `text` | main text content of the page |
-| `table_data` | headers and row data from tables |
-
-**Constants:**
-- `ACT_TIMEOUT_MS = 30000` -- timeout for AI-driven actions
-- `DEFAULT_AGENT_MAX_STEPS = 10` -- max steps for autonomous agent workflows
-
 ### Exploitation Workflow Tools (6)
 
 Orchestration tools for the exploitation pipeline:
@@ -770,13 +734,6 @@ const DEFAULT_TIMEOUT = 5000;      // 5 seconds for most browser operations
 const MAX_CONTENT_LENGTH = 15000;  // Truncate page content returned to the agent
 ```
 
-**Stagehand AI** (`src/mcp/stagehand-manager.js`):
-
-```javascript
-const ACT_TIMEOUT_MS = 30000;            // 30 seconds for AI-driven actions
-const DEFAULT_AGENT_MAX_STEPS = 10;      // Max steps for autonomous agent workflows
-```
-
 **Rate limiting** (`src/utils/rate-limiter.js`):
 
 ```javascript
@@ -1003,7 +960,6 @@ Add to the categorization map in `src/parser/normalizer.js` and the queue bucket
 | Package | Version | Purpose |
 |---------|---------|---------|
 | `openai` | ^6.15.0 | LLM API client (used by all providers) |
-| `@browserbasehq/stagehand` | ^3.0.8 | AI-powered browser automation (act, extract, observe, agent) |
 | `playwright` | ^1.57.0 | Browser automation |
 | `zx` | ^8.8.5 | Shell utilities, `fs` and `path` helpers |
 | `inquirer` | ^9.3.8 | Interactive CLI prompts |
@@ -1011,7 +967,7 @@ Add to the categorization map in `src/parser/normalizer.js` and the queue bucket
 | `axios` | ^1.13.2 | HTTP client |
 | `dotenv` | ^17.3.1 | Environment variable loading from `.env` |
 | `js-yaml` | ^4.1.1 | YAML parsing |
-| `zod` | ^4.3.6 | Schema validation (used by Stagehand extraction) |
+| `zod` | ^4.3.6 | Schema validation |
 
 ### Development
 

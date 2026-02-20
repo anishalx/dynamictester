@@ -103,7 +103,7 @@ describe('PayloadGenerator', () => {
     const allVulnTypes = [
       'injection', 'command_injection', 'xss', 'ssrf', 'ssti',
       'traversal', 'xxe', 'redirect', 'auth', 'secrets',
-      'deserialization', 'config', 'crypto'
+      'deserialization', 'config', 'crypto', 'upload', 'access'
     ];
 
     const allStages = ['confirmation', 'fingerprint', 'exploit'];
@@ -134,7 +134,7 @@ describe('PayloadGenerator', () => {
     const allVulnTypes = [
       'injection', 'command_injection', 'xss', 'ssrf', 'ssti',
       'traversal', 'xxe', 'redirect', 'auth', 'secrets',
-      'deserialization', 'config', 'crypto'
+      'deserialization', 'config', 'crypto', 'upload', 'access'
     ];
 
     for (const vulnType of allVulnTypes) {
