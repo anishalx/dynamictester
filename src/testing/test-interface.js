@@ -1,6 +1,6 @@
 /**
  * Base class for dynamic vulnerability testing
- * Implements Shannon's 3-stage exploitation workflow
+ * Implements the 3-stage exploitation workflow (confirm, fingerprint, exploit)
  */
 export class VulnerabilityTester {
   /**

@@ -2,7 +2,7 @@ import { determineLevel, getLevelDetails } from './exploitation-levels.js';
 
 /**
  * Classify vulnerability based on testing evidence
- * Implements Shannon's classification decision framework
+ * Implements the classification decision framework
  * 
  * Classifications:
  * - CONFIRMED: Exploitation proven with data extraction (Level 3-4)
