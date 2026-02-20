@@ -12,7 +12,7 @@ Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL,
 |---------|-------------|
 | **Multi-Analyzer Support** | Parses output from 7 static analyzers with auto-detection |
 | **7 LLM Providers** | OpenAI, DeepSeek, Qwen, GitHub Copilot, Google Gemini, OpenRouter, NVIDIA NIM |
-| **20 Agent Tools** | 15 browser tools + 5 exploitation workflow tools |
+| **25 Agent Tools** | 15 browser + 4 Stagehand AI + 6 exploitation workflow tools |
 | **16 Vulnerability Categories** | Injection, XSS, SSRF, XXE, traversal, auth, secrets, and more |
 | **Content-Based Deduplication** | SHA-256 hashing eliminates duplicate findings across analyzers |
 | **4-Class Classification** | CONFIRMED / LIKELY / BLOCKED / NOT_REPRODUCIBLE |
@@ -38,11 +38,15 @@ Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL,
 - [Auth & Providers](#auth--providers)
 - [Supported Analyzers](#supported-analyzers)
 - [Agent Tools](#agent-tools)
+  - [Browser Tools](#browser-tools-15)
+  - [Stagehand AI Browser Tools](#stagehand-ai-browser-tools-4)
+  - [Exploitation Workflow Tools](#exploitation-workflow-tools-6)
 - [Classification System](#classification-system)
 - [Output & Reports](#output--reports)
 - [Prompt Templates](#prompt-templates)
 - [CI/CD Mode](#cicd-mode)
 - [Configuration](#configuration)
+  - [Agent Loop Advanced Features](#agent-loop-advanced-features)
 - [Testing](#testing)
 - [Extending the Tool](#extending-the-tool)
 - [Troubleshooting](#troubleshooting)
@@ -87,6 +91,15 @@ Takes vulnerability findings from static analysis tools (Semgrep, Trivy, CodeQL,
 |  | JWT/Cookie  |                   | 4-Level Status   |                   |
 |  | Injection   |                   | 5-Level Proof    |                   |
 |  +-------------+                   +------------------+                   |
+|                                             |                             |
+|                                    +--------v---------+                   |
+|                                    | Stagehand AI     |                   |
+|                                    |  (4 tools)       |                   |
+|                                    |                  |                   |
+|                                    | AI Act/Extract   |                   |
+|                                    | Observe/Agent    |                   |
+|                                    | Zod Schemas      |                   |
+|                                    +------------------+                   |
 |                                                                           |
 |  +--------------------------------------------------------------------+  |
 |  |                     Provider Registry                              |  |
@@ -116,7 +129,8 @@ dynamictester/
 │   │   └── config-manager.js            # Persistent config at ~/.config/dynamictester/
 │   │
 │   ├── mcp/
-│   │   └── browser-server.js            # BrowserManager — 15 Playwright tools for the LLM
+│   │   ├── browser-server.js            # BrowserManager — 15 Playwright tools for the LLM
+│   │   └── stagehand-manager.js         # StagehandManager — 4 AI-powered browser tools (act, extract, observe, agent)
 │   │
 │   ├── parser/
 │   │   ├── normalizer.js                # Severity/confidence normalization, SHA-256 dedup, 18+ categories
@@ -247,6 +261,9 @@ node src/main.js --ci --fail-on-likely
 | `--provider=<name>` | Override LLM provider (`openai`, `deepseek`, `qwen`, `copilot`, `google`, `openrouter`, `nvidia`) |
 | `--model=<name>` | Override LLM model (e.g., `gpt-4o`, `gemini-2.5-pro`, `deepseek-chat`) |
 | `--ci` | Enable CI/CD mode -- generate CI report and exit with status code |
+| `--target=<url>` | Target URL (required in CI mode, e.g., `http://localhost:3000`) |
+| `--results=<paths>` | Path to analyzer result file(s), comma-separated (required in CI mode) |
+| `--output=<dir>` | Output directory for reports (required in CI mode) |
 | `--fail-on-likely` | In CI mode, also fail for LIKELY-classified findings |
 | `--fail-on-blocked` | In CI mode, also fail for BLOCKED-classified findings |
 
@@ -411,7 +428,7 @@ Results are deduplicated using content-based SHA-256 hashing (on source, checkId
 
 ## Agent Tools
 
-The LLM agent has access to **20 tools** across two categories.
+The LLM agent has access to **25 tools** across three categories.
 
 ### Browser Tools (15)
 
@@ -435,7 +452,33 @@ Playwright-based browser automation exposed to the LLM agent:
 | `browser_get_auth_status` | Check stored auth tokens |
 | `browser_clear_auth` | Clear all stored auth tokens |
 
-### Exploitation Workflow Tools (5)
+### Stagehand AI Browser Tools (4)
+
+AI-powered browser automation via [@browserbasehq/stagehand](https://github.com/browserbasehq/stagehand). These tools use natural language instead of CSS selectors, making them self-healing and resilient to UI changes. Stagehand owns the browser lifecycle and exposes Playwright via Chrome DevTools Protocol for full API compatibility.
+
+| Tool | Description |
+|------|-------------|
+| `stagehand_act` | Execute browser actions via natural language (e.g., "click the login button", "fill in the email field with test@example.com") |
+| `stagehand_extract` | Extract structured data from pages using AI with predefined Zod schemas |
+| `stagehand_observe` | Discover available actions and interactive elements on the current page |
+| `stagehand_agent` | Execute complex multi-step browser workflows autonomously (max 10 steps) |
+
+**Predefined extraction schemas** for `stagehand_extract`:
+
+| Schema | Fields Extracted |
+|--------|-----------------|
+| `form_fields` | name, type, required, placeholder, current value |
+| `error_messages` | message, type (validation/auth/server/general) |
+| `links` | text, href, type (navigation/external/api/anchor) |
+| `api_endpoints` | url, method, description |
+| `text` | main text content of the page |
+| `table_data` | headers and row data from tables |
+
+**Constants:**
+- `ACT_TIMEOUT_MS = 30000` -- timeout for AI-driven actions
+- `DEFAULT_AGENT_MAX_STEPS = 10` -- max steps for autonomous agent workflows
+
+### Exploitation Workflow Tools (6)
 
 Orchestration tools for the exploitation pipeline:
 
@@ -445,6 +488,7 @@ Orchestration tools for the exploitation pipeline:
 | `generate_payloads` | Generate context-aware payload guidance per vulnerability and stage |
 | `analyze_response` | Analyze HTTP response for DB errors, WAF blocking, SSRF/XXE/XSS indicators, boolean/timing signals |
 | `generate_bypasses` | Generate WAF/filter bypass variations for blocked payloads |
+| `update_plan` | Create or update the exploitation plan with one task per vulnerability, tracking status (pending/in_progress/completed/skipped). **Mandatory** -- the agent must call this before starting and after each finding. |
 | `save_evidence` | Save exploitation evidence with full source code mapping and 4-level classification |
 
 ### `browser_http_request` Example
@@ -661,13 +705,13 @@ Run with `--ci` to get machine-readable output and exit codes:
 
 ```bash
 # Basic CI mode (fails only on CONFIRMED exploits)
-node src/main.js --ci
+node src/main.js --ci --target=http://localhost:3000 --results=semgrep.json --output=./output
 
 # Strict mode (fails on CONFIRMED + LIKELY)
-node src/main.js --ci --fail-on-likely
+node src/main.js --ci --target=http://localhost:3000 --results=semgrep.json,trivy.json --output=./output --fail-on-likely
 
 # Maximum strictness (fails on CONFIRMED + LIKELY + BLOCKED)
-node src/main.js --ci --fail-on-likely --fail-on-blocked
+node src/main.js --ci --target=http://localhost:3000 --results=semgrep.json --output=./output --fail-on-likely --fail-on-blocked
 ```
 
 ### Exit Codes
@@ -707,23 +751,37 @@ Machine-readable JSON at `output/ci-report.json`:
 **Agent loop** (`src/agents/executor.js`):
 
 ```javascript
-const maxTurns = 75;                    // Max agent conversation turns
-const MAX_TOOL_RESULT_LENGTH = 8000;    // Truncate tool results to avoid token limits
-const temperature = 0.2;                // Low temperature for consistent exploitation
+const MAX_AGENT_TURNS = 75;                      // Max agent conversation turns
+const MAX_TOOL_RESULT_LENGTH = 8000;              // Truncate tool results to avoid token limits
+const MAX_MESSAGES_BEFORE_PRUNE = 80;             // Triggers context window pruning
+const MESSAGES_TO_KEEP = 30;                      // Messages preserved after pruning
+const DEFAULT_TURN_DELAY = 2000;                  // Base delay between API turns (ms)
+const FREE_TIER_TURN_DELAY = 15000;               // Delay for free-tier models (ms)
+const MAX_TURN_DELAY = 60000;                     // Maximum inter-turn delay cap (ms)
+const POST_RATE_LIMIT_DELAY_MULTIPLIER = 3;       // Multiplier after rate limit recovery
+const max_tokens = 4096;                          // Max tokens per API call
+const temperature = 0.2;                          // Low temperature for consistent exploitation
 ```
 
-**Browser timeouts** (`src/mcp/browser-server.js`):
+**Browser automation** (`src/mcp/browser-server.js`):
 
 ```javascript
-const DEFAULT_TIMEOUT = 5000;  // 5 seconds for most operations
-const SHORT_TIMEOUT = 2000;    // 2 seconds for quick checks
+const DEFAULT_TIMEOUT = 5000;      // 5 seconds for most browser operations
+const MAX_CONTENT_LENGTH = 15000;  // Truncate page content returned to the agent
+```
+
+**Stagehand AI** (`src/mcp/stagehand-manager.js`):
+
+```javascript
+const ACT_TIMEOUT_MS = 30000;            // 30 seconds for AI-driven actions
+const DEFAULT_AGENT_MAX_STEPS = 10;      // Max steps for autonomous agent workflows
 ```
 
 **Rate limiting** (`src/utils/rate-limiter.js`):
 
 ```javascript
 {
-  maxRetries: 3,        // Retry attempts
+  maxRetries: 5,        // Retry attempts (executor default)
   staggerDelay: 2000,   // Delay between parallel task starts (ms)
   retryDelay: 5000      // Base delay between retries (ms)
 }
@@ -738,6 +796,28 @@ const SHORT_TIMEOUT = 2000;    // 2 seconds for quick checks
 | Timeout | Exponential backoff with jitter |
 | Network Error | Exponential backoff with jitter |
 | Auth Error (401/403) | Not retried (fatal) |
+
+### Agent Loop Advanced Features
+
+The agent executor (`src/agents/executor.js`) implements several advanced features to maximize exploitation effectiveness:
+
+**Context Window Pruning:**
+When the conversation exceeds `MAX_MESSAGES_BEFORE_PRUNE` (80 messages), the system automatically prunes older messages while keeping the most recent `MESSAGES_TO_KEEP` (30). The system prompt and initial tool results are always preserved.
+
+**Proactive Pacing:**
+The agent uses adaptive turn delays to avoid rate limiting. Free-tier models (detected by `:free` suffix or known free model lists) use a 15-second delay between turns. After recovering from a rate limit error, the delay is multiplied by `POST_RATE_LIMIT_DELAY_MULTIPLIER` (3x). The delay is capped at `MAX_TURN_DELAY` (60 seconds).
+
+**Stall Detection:**
+The agent tracks tool usage over a 15-turn sliding window. If the agent has not made meaningful progress (e.g., repeating the same tools without new findings), a nudge message is injected to redirect the agent. Maximum of 3 nudges before the agent is forced to conclude.
+
+**Plan-Driven Execution:**
+The agent must call `update_plan` at the start to create a task list (one task per vulnerability) and after each finding to update statuses. This ensures systematic coverage and prevents the agent from skipping vulnerabilities.
+
+**Provider Fallback & Model Cycling:**
+On persistent rate limiting, the executor can cycle through alternative models within the same provider. If all models are exhausted, it falls back to a different provider entirely. Auth/TOS errors are handled gracefully with user-facing messages.
+
+**Tool Choice Forcing:**
+On the first turn, `tool_choice` is set to force the agent to call `read_queue_file`, ensuring the agent always starts by loading the vulnerability queue rather than generating a response.
 
 ---
 
@@ -923,6 +1003,7 @@ Add to the categorization map in `src/parser/normalizer.js` and the queue bucket
 | Package | Version | Purpose |
 |---------|---------|---------|
 | `openai` | ^6.15.0 | LLM API client (used by all providers) |
+| `@browserbasehq/stagehand` | ^3.0.8 | AI-powered browser automation (act, extract, observe, agent) |
 | `playwright` | ^1.57.0 | Browser automation |
 | `zx` | ^8.8.5 | Shell utilities, `fs` and `path` helpers |
 | `inquirer` | ^9.3.8 | Interactive CLI prompts |
@@ -930,7 +1011,7 @@ Add to the categorization map in `src/parser/normalizer.js` and the queue bucket
 | `axios` | ^1.13.2 | HTTP client |
 | `dotenv` | ^17.3.1 | Environment variable loading from `.env` |
 | `js-yaml` | ^4.1.1 | YAML parsing |
-| `zod` | ^4.3.6 | Schema validation |
+| `zod` | ^4.3.6 | Schema validation (used by Stagehand extraction) |
 
 ### Development
 
