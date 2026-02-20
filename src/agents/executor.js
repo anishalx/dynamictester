@@ -174,81 +174,83 @@ export async function executeExploitationAgent(
     .replace(/{{WEB_URL}}/g, () => targetUrl)
     .replace(/{{QUEUE_PATH}}/g, () => queuePath);
   
-  // Add universal context (no app-specific content)
+  // Add universal system instructions (methodology details are in per-template prompts)
   systemPrompt += `
 
-CRITICAL INSTRUCTIONS:
-1. You MUST test EVERY vulnerability in the queue, not just a sample
-2. Do NOT stop early - continue until all vulnerabilities are tested
-3. ALWAYS use static analysis context (file, line, technology) to craft payloads
-4. Use browser_http_request for API endpoints - faster and more reliable
-5. If browser_click fails with timeout, use browser_force_click instead
-6. Save evidence for EACH vulnerability with FULL source mapping
+═══════════════════════════════════════════════════════════════════
+UNIVERSAL RULES — These override everything else
+═══════════════════════════════════════════════════════════════════
 
-MANDATORY TESTING REQUIREMENT:
-- You MUST make at least one HTTP request (browser_http_request or browser_navigate) for EACH web vulnerability BEFORE calling save_evidence
-- Do NOT call save_evidence immediately after read_queue_file — reading the queue is NOT testing
-- Do NOT call save_evidence based solely on static analysis findings — you must actually probe the target
-- For each vulnerability: send a request, observe the response, THEN save evidence with the actual result
-- Exception: secrets/config/credential findings may not require HTTP testing. For these, explain in the evidence field why no HTTP request was needed
-- The system tracks HTTP requests between save_evidence calls. Evidence saved without prior HTTP requests is flagged as untested
+RULE 1 — NEVER REPEAT PAYLOADS:
+  NEVER send the same payload to the same endpoint twice. Every request must differ
+  in payload content, encoding, injection point, or technique. If you catch yourself
+  about to resend something, STOP and vary your approach.
 
-TESTING METHODOLOGY (3-STAGE WORKFLOW):
-For EACH vulnerability, follow this sequence:
+RULE 2 — PLAN-DRIVEN EXECUTION:
+  After calling read_queue_file, you MUST immediately call update_plan to create a
+  task list with one task per vulnerability (use the vulnerability ID as the task ID).
+  Work through tasks sequentially: mark in_progress before testing, mark completed
+  after saving evidence. Only ONE task may be in_progress at a time.
 
-Stage 1 - CONFIRMATION: Call generate_payloads with stage="confirmation" first.
-  Use the returned guidance and fallback payloads to detect if the vuln exists.
-  Send the payload via browser_http_request and observe the response.
-  After each request, call analyze_response to interpret the result.
+RULE 3 — EVERY VULNERABILITY MUST BE TESTED:
+  You MUST call save_evidence for EVERY vulnerability in the queue. Do NOT stop
+  after testing a subset. Do NOT skip vulnerabilities without explanation.
 
-Stage 2 - FINGERPRINT: If confirmed, call generate_payloads with stage="fingerprint".
-  Identify the specific technology (database type, template engine, etc.).
-  Call analyze_response to detect database errors and technology signatures.
+RULE 4 — HTTP BEFORE EVIDENCE:
+  You MUST make at least one HTTP request (browser_http_request or browser_navigate)
+  for each web vulnerability BEFORE calling save_evidence. Reading the queue is NOT
+  testing. Static analysis findings alone are NOT evidence.
+  Exception: secrets/config/credential findings may not require HTTP testing — explain
+  why in the evidence field.
+  The system tracks HTTP requests between save_evidence calls and flags untested evidence.
 
-Stage 3 - EXPLOIT: Call generate_payloads with stage="exploit".
-  Extract data or demonstrate impact using technology-specific payloads.
+RULE 5 — EFFORT THRESHOLDS:
+  Before classifying any vulnerability as NOT_REPRODUCIBLE or BLOCKED, you MUST:
+  - Try at least 3 distinct payloads with different techniques
+  - Try at least 2 different encodings or bypass variations if initial attempts fail
+  - Call generate_bypasses at least once if any payload is blocked
+  Classification is FORBIDDEN until these minimums are met.
 
-BYPASS WORKFLOW:
-- If a payload returns 403, WAF blocking, or is rejected, call generate_bypasses
-  with the blocked payload. It returns encoded/obfuscated alternatives.
-- Try the bypass payloads and analyze responses again.
-- If all bypasses fail, move on (the vulnerability may be properly mitigated).
+RULE 6 — NO TEXT-ONLY RESPONSES:
+  Every response must include at least one tool call. Never respond with only text.
 
-RESPONSE ANALYSIS:
-- ALWAYS call analyze_response after receiving test results
-- It detects: database errors (SQLi confirmed), WAF blocking, input validation
-- For blind injection: provide true/false response bodies for boolean comparison
-- For time-based: provide normalTime, delayedTime, expectedDelay
+═══════════════════════════════════════════════════════════════════
+TOOL REFERENCE
+═══════════════════════════════════════════════════════════════════
 
-ENDPOINT DISCOVERY FROM SOURCE FILES:
-- routes/users.js    → /users, /api/users
-- controllers/auth.js → /auth, /login
-- api/products.js    → /api/products
-- views/search.ejs   → /search
-Use the file path pattern to derive likely endpoints
+- update_plan: MANDATORY — create task list after read_queue_file, update status as you work
+- read_queue_file: Load ALL vulnerabilities with source context — call this FIRST
+- generate_payloads: Call BEFORE testing each vuln (returns guidance + fallback payloads)
+- browser_http_request: REQUIRED — send payloads to the target (faster than navigate for APIs)
+- analyze_response: Call AFTER each test request (detects DB errors, WAF, injection indicators)
+- generate_bypasses: Call when a payload is BLOCKED (returns encoded/obfuscated alternatives)
+- browser_navigate / browser_click / browser_force_click: For UI-based testing
+- save_evidence: Call AFTER testing — include actual HTTP response, source mapping, observed behavior
 
-TOOL USAGE:
-- read_queue_file: Get ALL vulnerabilities with source context FIRST
-- generate_payloads: Call BEFORE testing each vuln (returns context + fallback payloads)
-- browser_http_request: REQUIRED — send the payload to the target and get a real response
-- analyze_response: Call AFTER each test request (interprets results)
-- generate_bypasses: Call when payload is BLOCKED (returns bypass variations)
-- browser_force_click: Use when normal click times out
-- save_evidence: Call AFTER testing — include full source mapping, actual HTTP response, and observed behavior
+═══════════════════════════════════════════════════════════════════
+EVIDENCE QUALITY REQUIREMENTS
+═══════════════════════════════════════════════════════════════════
 
-EVIDENCE QUALITY REQUIREMENTS:
-- The 'response' field MUST contain the actual HTTP status code and key response data from your test
-- The 'endpoint' field MUST contain the actual URL you tested
-- The 'method' field MUST contain the HTTP method you used
-- The 'payload' field MUST contain the exact payload you sent
-- The 'evidence' field MUST describe what you observed (not what you expected)
-- If exploitation failed, describe what the response actually showed (e.g., "HTTP 200, response contained sanitized output, no injection detected")
-- Set securityBlocker if security controls prevented exploitation (WAF, input validation, parameterized queries)
+Every save_evidence call MUST include:
+- 'response': Actual HTTP status code and key response data from your test
+- 'endpoint': The actual URL you tested
+- 'method': The HTTP method you used (GET, POST, PUT, etc.)
+- 'payload': The exact payload you sent
+- 'evidence': What you OBSERVED, not what you expected
+  If exploitation failed: describe what the response actually showed
+  (e.g., "HTTP 200, response contained sanitized output, no injection detected")
+- 'securityBlocker': Set if security controls prevented exploitation (WAF, input validation, etc.)
 
-COMPLETION:
-- You are NOT done until you have called save_evidence for EVERY vulnerability
-- Do NOT stop after just reading the queue — you must test each vulnerability
-- Do NOT respond with text-only messages — always make tool calls`;
+═══════════════════════════════════════════════════════════════════
+COMPLETION CRITERIA
+═══════════════════════════════════════════════════════════════════
+
+You are finished ONLY when ALL of these are true:
+1. save_evidence has been called for EVERY vulnerability in the queue
+2. Every task in your plan is marked 'completed' or 'skipped'
+3. Each evidence entry reflects actual testing (not queue reading)
+
+If the system nudges you about stalls, check your plan for pending tasks and resume.`;
   
   // ---------------------------------------------------------------------------
   // Initialize Playwright browser for dynamic testing
@@ -868,8 +870,103 @@ COMPLETION:
           required: ['blockedPayload', 'vulnerabilityType']
         }
       }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'update_plan',
+        description: 'Create or update your exploitation plan. MANDATORY: Call this immediately after read_queue_file to create a task for EACH vulnerability. Update task statuses as you work through them. At most ONE task can be in_progress at a time.',
+        parameters: {
+          type: 'object',
+          properties: {
+            tasks: {
+              type: 'array',
+              description: 'Array of plan tasks — one per vulnerability. Update statuses as you progress.',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string', description: 'Unique task ID (e.g. vuln-1, vuln-2)' },
+                  description: { type: 'string', description: 'What this task tests (e.g. "SQLi in routes/login.ts:34")' },
+                  status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'skipped'], description: 'Task status' },
+                  notes: { type: 'string', description: 'Result notes (e.g. "CONFIRMED — extracted user table", "NOT_REPRODUCIBLE — input sanitized")' }
+                },
+                required: ['id', 'description', 'status']
+              }
+            }
+          },
+          required: ['tasks']
+        }
+      }
     }
   ];
+
+  /**
+   * Update the agent's exploitation plan. Creates/updates a task list for loop control.
+   * The agent MUST call this after loading the queue to create one task per vulnerability.
+   * @param {object} params - Plan update parameters
+   * @param {Array<{id: string, description: string, status: string, notes?: string}>} params.tasks - Task list
+   * @returns {object} Plan status summary
+   */
+  function update_plan(params) {
+    const { tasks } = params;
+    if (!Array.isArray(tasks) || tasks.length === 0) {
+      return { status: 'error', message: 'tasks must be a non-empty array' };
+    }
+
+    const VALID_STATUSES = ['pending', 'in_progress', 'completed', 'skipped'];
+
+    // Validate individual task structure and normalize missing fields
+    for (const task of tasks) {
+      if (!task.id || !task.description) {
+        return { status: 'error', message: `Each task must have an id and description. Invalid task: ${JSON.stringify(task)}` };
+      }
+      if (!task.status || !VALID_STATUSES.includes(task.status)) {
+        task.status = 'pending';
+      }
+    }
+
+    // Validate: at most one task can be in_progress
+    const inProgressTasks = tasks.filter(t => t.status === 'in_progress');
+    if (inProgressTasks.length > 1) {
+      return {
+        status: 'error',
+        message: `Only ONE task can be in_progress at a time. Found ${inProgressTasks.length}: ${inProgressTasks.map(t => t.id).join(', ')}`
+      };
+    }
+
+    // Log status changes compared to previous plan
+    if (agentPlan.length > 0) {
+      const oldMap = new Map(agentPlan.map(t => [t.id, t.status]));
+      for (const task of tasks) {
+        const oldStatus = oldMap.get(task.id);
+        if (oldStatus && oldStatus !== task.status) {
+          const arrow = `${oldStatus} → ${task.status}`;
+          const notes = task.notes ? ` — ${task.notes}` : '';
+          console.log(chalk.gray(`      📝 ${task.id}: ${arrow}${notes}`));
+        }
+      }
+    }
+
+    agentPlan = tasks;
+    if (!planCreated) {
+      planCreated = true;
+      console.log(chalk.cyan(`      📋 Plan created with ${tasks.length} tasks`));
+    }
+
+    const completed = tasks.filter(t => t.status === 'completed').length;
+    const pending = tasks.filter(t => t.status === 'pending').length;
+    const inProgress = inProgressTasks.length;
+    const skipped = tasks.filter(t => t.status === 'skipped').length;
+
+    return {
+      status: 'success',
+      totalTasks: tasks.length,
+      completed,
+      pending,
+      inProgress,
+      skipped
+    };
+  }
 
   // Tool handlers map
   const toolHandlers = {
@@ -878,19 +975,62 @@ COMPLETION:
     generate_payloads,
     analyze_response,
     generate_bypasses,
+    update_plan,
     ...Object.fromEntries(browserTools.map(t => [t.name, t.handler]))
   };
 
-  // Build initial user message with queue summary
-  const vulnSummary = queueData.vulnerabilities?.slice(0, 5).map((v, i) => 
-    `${i + 1}. ${v.vulnerabilityType} at ${v.location}`
-  ).join('\n') || 'No vulnerabilities loaded';
+  // Build initial user message with full vulnerability summary grouped by type
+  let vulnSummary = '';
+  if (queueData.vulnerabilities?.length > 0) {
+    // Group vulnerabilities by type for a clear overview
+    const byType = {};
+    for (const v of queueData.vulnerabilities) {
+      const type = v.vulnerabilityType || 'unknown';
+      if (!byType[type]) byType[type] = [];
+      byType[type].push(v);
+    }
+    const typeLines = Object.entries(byType).map(([type, vulns]) => {
+      const ids = vulns.map(v => v.id || 'no-id').join(', ');
+      return `  ${type} (${vulns.length}): ${ids}`;
+    });
+    vulnSummary = typeLines.join('\n');
+  } else {
+    vulnSummary = '  No vulnerabilities loaded';
+  }
 
   const messages = [
     { role: 'system', content: systemPrompt },
     { 
       role: 'user', 
-      content: `Target: ${targetUrl}\n\nVulnerabilities to test (${totalVulnerabilities} total):\n${vulnSummary}\n\nYou MUST test ALL ${totalVulnerabilities} vulnerabilities. Follow this workflow for EACH one:\n1. Call read_queue_file to load the full vulnerability queue\n2. For each vulnerability: call generate_payloads with stage="confirmation"\n3. Use browser_http_request to ACTUALLY SEND test payloads to the target — this is REQUIRED before saving evidence\n4. Call analyze_response to interpret the ACTUAL response you received\n5. If blocked, call generate_bypasses and retry with bypass payloads\n6. Call save_evidence with the REAL results — include the actual HTTP status, response body, and observed behavior\n\nIMPORTANT: Every save_evidence call for a web vulnerability MUST be preceded by at least one browser_http_request. Do NOT save evidence without testing. The system tracks this and will flag untested evidence.\n\nDo NOT stop until you have called save_evidence for every vulnerability. Start by calling read_queue_file NOW.` 
+      content: `Target: ${targetUrl}
+Queue: ${queuePath}
+
+${totalVulnerabilities} vulnerabilities to test:
+${vulnSummary}
+
+═══ YOUR MANDATORY FIRST 2 STEPS ═══
+
+Step 1: Call read_queue_file to load the full vulnerability queue with source context.
+
+Step 2: Call update_plan to create your task list. Create one task per vulnerability
+        using the vulnerability ID as the task ID. Set all tasks to "pending".
+
+═══ THEN FOR EACH VULNERABILITY ═══
+
+1. Mark the task in_progress via update_plan
+2. Call generate_payloads with stage="confirmation"
+3. Send test payloads via browser_http_request (REQUIRED before saving evidence)
+4. Call analyze_response to interpret results
+5. If blocked → call generate_bypasses, retry with bypass payloads
+6. If confirmed → escalate through fingerprint and exploit stages
+7. Call save_evidence with ACTUAL results (HTTP status, response, observed behavior)
+8. Mark the task completed via update_plan
+9. Move to the next vulnerability
+
+You are NOT done until save_evidence has been called for ALL ${totalVulnerabilities} vulnerabilities
+and every task in your plan is completed.
+
+Start NOW by calling read_queue_file.`
     }
   ];
 
@@ -907,6 +1047,189 @@ COMPLETION:
   // Proactive pacing: delay between turns to prevent rate limits
   let turnDelay = isFreeTierModel(model) ? FREE_TIER_TURN_DELAY : DEFAULT_TURN_DELAY;
   const failedModelsByProvider = new Map();
+
+  // Descriptive output state — tracks what the agent is currently working on
+  let currentVulnLabel = null; // e.g. "SQLi in routes/login.ts:34"
+  const agentStartTime = Date.now();
+  const classificationCounts = { CONFIRMED: 0, LIKELY: 0, BLOCKED: 0, NOT_REPRODUCIBLE: 0 };
+
+  // Agent plan state — used by the update_plan tool for loop control
+  let agentPlan = [];
+  let planCreated = false;
+
+  // ---------------------------------------------------------------------------
+  // Descriptive output formatters
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Format a tool call into a human-readable one-liner.
+   * Extracts key info from the tool arguments to describe what is happening.
+   *
+   * @param {string} toolName - Name of the tool being called
+   * @param {object} args - Parsed tool call arguments
+   * @returns {string} Formatted description with emoji prefix
+   */
+  function formatToolCall(toolName, args) {
+    switch (toolName) {
+      case 'browser_http_request': {
+        const method = (args.method || 'GET').toUpperCase();
+        const url = args.url || '(unknown)';
+        return `🌐 HTTP ${method} ${url}`;
+      }
+      case 'browser_navigate':
+        return `🌐 Navigating to ${args.url || '(unknown)'}`;
+      case 'browser_fill': {
+        const val = (args.value || '').length > 30
+          ? args.value.slice(0, 27) + '...'
+          : args.value || '';
+        return `⌨️  Filling ${args.selector || '?'} → "${val}"`;
+      }
+      case 'browser_click':
+        return `🖱️  Clicking ${args.selector || '?'}`;
+      case 'browser_get_response':
+        return '📄 Reading page content';
+      case 'browser_screenshot':
+        return '📸 Taking screenshot';
+      case 'generate_payloads': {
+        const stage = args.stage || 'confirmation';
+        const vtype = args.vulnerabilityType || 'unknown';
+        const loc = args.file ? `(${args.file}${args.line ? ':' + args.line : ''})` : '';
+        return `🎯 Generating ${stage} payloads for ${vtype} ${loc}`;
+      }
+      case 'analyze_response': {
+        const status = args.responseStatus ? `HTTP ${args.responseStatus}` : 'response';
+        const ttype = args.testType || '';
+        return `🔍 Analyzing ${status} for ${ttype || 'vulnerability'} indicators`;
+      }
+      case 'generate_bypasses': {
+        const vt = args.vulnerabilityType || 'unknown';
+        return `🛡️  Generating WAF/filter bypasses for blocked ${vt} payload`;
+      }
+      case 'read_queue_file':
+        return '📋 Loading vulnerability queue';
+      case 'save_evidence': {
+        const t = args.type || args.vulnerabilityType || 'unknown';
+        const sf = args.sourceFile || args.file || '';
+        const sl = args.sourceLine || args.line || '';
+        const loc = sf ? ` (${sf}${sl ? ':' + sl : ''})` : '';
+        return `💾 Saving evidence for ${t}${loc}`;
+      }
+      case 'update_plan': {
+        const tasks = args.tasks || [];
+        const completed = tasks.filter(t => t.status === 'completed').length;
+        const inProg = tasks.filter(t => t.status === 'in_progress').length;
+        return `📝 Updating plan (${completed}/${tasks.length} completed${inProg ? `, ${inProg} in progress` : ''})`;
+      }
+      default:
+        return `🔧 ${toolName}`;
+    }
+  }
+
+  /**
+   * Format a tool result into a concise human-readable summary.
+   * Parses the JSON result and extracts the most relevant information.
+   *
+   * @param {string} toolName - Name of the tool that produced the result
+   * @param {string} resultStr - JSON-stringified result from the tool handler
+   * @returns {string} One-line summary of the result
+   */
+  function formatToolResult(toolName, resultStr) {
+    let parsed;
+    try {
+      parsed = JSON.parse(resultStr);
+    } catch (e) {
+      // Not JSON — fall back to length-based display
+      return resultStr.length < 200 ? resultStr : `(${resultStr.length} chars)`;
+    }
+
+    switch (toolName) {
+      case 'browser_http_request': {
+        if (parsed.status === 'error') {
+          return `❌ ${parsed.message || 'Request failed'}`;
+        }
+        const hs = parsed.httpStatus || '?';
+        const st = parsed.statusText || '';
+        const time = parsed.responseTimeSec ? ` (${parsed.responseTimeSec}s)` : '';
+        const bodyLen = parsed.body ? `${parsed.body.length} bytes` : '';
+        return `✅ HTTP ${hs} ${st}${time}${bodyLen ? ' — ' + bodyLen : ''}`;
+      }
+      case 'browser_navigate': {
+        if (parsed.status === 'error') {
+          return `❌ ${parsed.message || 'Navigation failed'}`;
+        }
+        const title = parsed.title || '(no title)';
+        return `✅ Page loaded: "${title.length > 60 ? title.slice(0, 57) + '...' : title}"`;
+      }
+      case 'browser_fill': {
+        if (parsed.status === 'error') {
+          return `❌ ${parsed.message || 'Fill failed'}`;
+        }
+        return `✅ Filled ${parsed.selector || '?'}`;
+      }
+      case 'browser_click': {
+        if (parsed.status === 'error') {
+          return `❌ ${parsed.message || 'Click failed'}`;
+        }
+        return `✅ Clicked ${parsed.selector || '?'}`;
+      }
+      case 'browser_get_response':
+        if (parsed.status === 'error') {
+          return `❌ ${parsed.message || 'Failed to read page'}`;
+        }
+        return `Page content retrieved (${resultStr.length} chars)`;
+      case 'generate_payloads':
+        return `Generated payloads for ${parsed.stage || 'confirmation'} stage`;
+      case 'analyze_response': {
+        const parts = [];
+        if (parsed.databaseErrors?.detected) parts.push('DB errors detected');
+        if (parsed.wafBlocking?.detected) parts.push(`WAF detected: ${parsed.wafBlocking.waf || 'unknown'}`);
+        if (parsed.xssReflection?.detected) parts.push('XSS reflected');
+        if (parsed.ssrfIndicators?.detected) parts.push('SSRF indicators found');
+        if (parsed.xxeIndicators?.detected) parts.push('XXE indicators found');
+        if (parts.length === 0) parts.push('No vulnerability indicators detected');
+        return parts.join(', ');
+      }
+      case 'generate_bypasses': {
+        const count = parsed.bypasses?.length || parsed.variations?.length || '?';
+        return `Generated ${count} bypass variations`;
+      }
+      case 'read_queue_file': {
+        const count = parsed.data?.totalCount
+          || parsed.data?.vulnerabilities?.length
+          || parsed.vulnerabilities?.length
+          || parsed.length;
+        if (count) return `Loaded ${count} vulnerabilities from queue`;
+        return `Queue loaded (${resultStr.length} chars)`;
+      }
+      case 'save_evidence':
+        // save_evidence has its own custom display — skip generic formatting
+        return null;
+      case 'update_plan': {
+        const c = parsed.completed || 0;
+        const ip = parsed.inProgress || 0;
+        const p = parsed.pending || 0;
+        const s = parsed.skipped || 0;
+        const parts = [`${c} completed`, `${ip} in progress`, `${p} pending`];
+        if (s > 0) parts.push(`${s} skipped`);
+        return `Plan: ${parts.join(', ')}`;
+      }
+      default:
+        return resultStr.length < 200 ? resultStr : `(${resultStr.length} chars)`;
+    }
+  }
+
+  /**
+   * Format elapsed time into a human-readable duration string.
+   * @param {number} ms - Elapsed time in milliseconds
+   * @returns {string} e.g. "2m 34s" or "45s"
+   */
+  function formatDuration(ms) {
+    const totalSec = Math.round(ms / 1000);
+    if (totalSec < 60) return `${totalSec}s`;
+    const min = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    return `${min}m ${sec}s`;
+  }
 
   function _recordModelFailure(providerKey, modelId) {
     if (!modelId) return;
@@ -950,7 +1273,10 @@ COMPLETION:
         console.log(chalk.gray(`   Context pruned: ${before} → ${messages.length} messages`));
       }
 
-      console.log(chalk.blue(`\n🤖 Turn ${turnCount + 1}:`));
+      const vulnCtx = currentVulnLabel
+        ? chalk.gray(` [Testing ${evidenceSavedCount + 1}/${totalVulnerabilities}: ${currentVulnLabel}]`)
+        : '';
+      console.log(chalk.blue(`\n🤖 Turn ${turnCount + 1}:`) + vulnCtx);
 
       // Force tool use until evidence has been saved; use 'auto' once testing has started
       // Some providers (e.g. Qwen in thinking mode) reject tool_choice: "required"
@@ -1145,9 +1471,20 @@ COMPLETION:
           const handler = toolHandlers[toolName];
           
            if (handler) {
-            console.log(chalk.yellow(`   🔧 ${toolName}`));
             try {
               const args = JSON.parse(toolCall.function.arguments);
+
+              // Display descriptive tool call (with parsed args for context)
+              console.log(chalk.yellow(`   ${formatToolCall(toolName, args)}`));
+
+              // Update current vulnerability label when payloads are generated
+              if (toolName === 'generate_payloads' && args.vulnerabilityType) {
+                const vtype = args.vulnerabilityType || 'unknown';
+                const loc = args.file
+                  ? `${args.file}${args.line ? ':' + args.line : ''}`
+                  : '';
+                currentVulnLabel = loc ? `${vtype} in ${loc}` : vtype;
+              }
 
               // Track HTTP tool calls BEFORE handler call (so save_evidence can see the count)
                const HTTP_TOOLS = ['browser_http_request', 'browser_navigate'];
@@ -1172,17 +1509,33 @@ COMPLETION:
                 evidenceSavedCount++;
                 lastEvidenceTurn = turnCount;
                 bypassEngine.reset(); // Fresh bypass budget for next vulnerability
+                // Track classification for the completion summary
+                const evidenceResult = typeof result === 'string' ? JSON.parse(result) : result;
+                const cls = evidenceResult?.classification || 'NOT_REPRODUCIBLE';
+                if (classificationCounts.hasOwnProperty(cls)) classificationCounts[cls]++;
                 console.log(chalk.cyan(`      📊 Evidence saved: ${evidenceSavedCount}/${totalVulnerabilities}`));
+                // Update vuln label from save_evidence args so the NEXT turn header is accurate
+                const seType = args.type || args.vulnerabilityType || '';
+                const seFile = args.sourceFile || args.file || '';
+                const seLine = args.sourceLine || args.line || '';
+                const seLoc = seFile ? `${seFile}${seLine ? ':' + seLine : ''}` : '';
+                if (seType || seLoc) {
+                  currentVulnLabel = seLoc ? `${seType} in ${seLoc}` : seType;
+                }
               }
 
-              // Truncate result for both display and API
-              const truncatedResult = truncateResult(result);
-              
-              if (truncatedResult.length < 200) {
-                console.log(chalk.gray(`      → ${truncatedResult}`));
-              } else {
-                console.log(chalk.gray(`      → (${truncatedResult.length} chars)`));
+              // Display formatted result summary from the RAW result (before truncation,
+              // so formatters can parse the full JSON structure, e.g. read_queue_file)
+              if (toolName !== 'save_evidence') {
+                const rawStr = typeof result === 'string' ? result : JSON.stringify(result);
+                const formatted = formatToolResult(toolName, rawStr);
+                if (formatted !== null) {
+                  console.log(chalk.gray(`      → ${formatted}`));
+                }
               }
+
+              // Truncate result for the API message (token limit)
+              const truncatedResult = truncateResult(result);
 
               messages.push({
                 role: 'tool',
@@ -1190,6 +1543,8 @@ COMPLETION:
                 content: truncatedResult
               });
             } catch (e) {
+              // Show the tool name even on parse/execution errors
+              console.log(chalk.yellow(`   🔧 ${toolName}`));
               console.log(chalk.red(`      → Error: ${e.message}`));
               messages.push({
                 role: 'tool',
@@ -1210,7 +1565,20 @@ COMPLETION:
         // Model responded with text only — no tool calls
         // Accept completion only if the agent has saved evidence for at least some vulnerabilities
         if (evidenceSavedCount > 0) {
-          console.log(chalk.green(`\n   ✅ Agent completed its work (${evidenceSavedCount}/${totalVulnerabilities} vulnerabilities tested)`));
+          const elapsed = formatDuration(Date.now() - agentStartTime);
+          const classSummary = Object.entries(classificationCounts)
+            .filter(([, v]) => v > 0)
+            .map(([k, v]) => {
+              const icon = k === 'CONFIRMED' ? '🔴' : k === 'LIKELY' ? '🟡' : k === 'BLOCKED' ? '🟠' : '🟢';
+              return `${icon} ${k}: ${v}`;
+            }).join('  ');
+          console.log(chalk.green(`\n   ✅ Agent completed its work (${evidenceSavedCount}/${totalVulnerabilities} vulnerabilities tested) in ${turnCount} turns, ${elapsed}`));
+          if (classSummary) console.log(chalk.gray(`      ${classSummary}`));
+          if (planCreated && agentPlan.length > 0) {
+            const planCompleted = agentPlan.filter(t => t.status === 'completed').length;
+            const planSkipped = agentPlan.filter(t => t.status === 'skipped').length;
+            console.log(chalk.gray(`      📋 Plan: ${planCompleted}/${agentPlan.length} completed${planSkipped ? `, ${planSkipped} skipped` : ''}`));
+          }
           break;
         }
 
@@ -1242,7 +1610,20 @@ COMPLETION:
 
       // Check for stop reason after tool execution — only break if we've done real work
       if (response.choices[0].finish_reason === 'stop' && evidenceSavedCount > 0) {
-        console.log(chalk.green(`\n   ✅ Agent finished (${evidenceSavedCount}/${totalVulnerabilities} vulnerabilities tested)`));
+        const elapsed = formatDuration(Date.now() - agentStartTime);
+        const classSummary = Object.entries(classificationCounts)
+          .filter(([, v]) => v > 0)
+          .map(([k, v]) => {
+            const icon = k === 'CONFIRMED' ? '🔴' : k === 'LIKELY' ? '🟡' : k === 'BLOCKED' ? '🟠' : '🟢';
+            return `${icon} ${k}: ${v}`;
+          }).join('  ');
+        console.log(chalk.green(`\n   ✅ Agent finished (${evidenceSavedCount}/${totalVulnerabilities} vulnerabilities tested) in ${turnCount} turns, ${elapsed}`));
+        if (classSummary) console.log(chalk.gray(`      ${classSummary}`));
+        if (planCreated && agentPlan.length > 0) {
+          const planCompleted = agentPlan.filter(t => t.status === 'completed').length;
+          const planSkipped = agentPlan.filter(t => t.status === 'skipped').length;
+          console.log(chalk.gray(`      📋 Plan: ${planCompleted}/${agentPlan.length} completed${planSkipped ? `, ${planSkipped} skipped` : ''}`));
+        }
         break;
       }
 
@@ -1250,13 +1631,35 @@ COMPLETION:
       // the last 15 turns, the agent is likely stuck. Nudge it once, then stop.
       if (evidenceSavedCount > 0 && (turnCount - lastEvidenceTurn) > 15) {
         if (evidenceSavedCount >= totalVulnerabilities) {
-          console.log(chalk.green(`\n   ✅ All ${totalVulnerabilities} vulnerabilities tested`));
+          const elapsed = formatDuration(Date.now() - agentStartTime);
+          const classSummary = Object.entries(classificationCounts)
+            .filter(([, v]) => v > 0)
+            .map(([k, v]) => {
+              const icon = k === 'CONFIRMED' ? '🔴' : k === 'LIKELY' ? '🟡' : k === 'BLOCKED' ? '🟠' : '🟢';
+              return `${icon} ${k}: ${v}`;
+            }).join('  ');
+          console.log(chalk.green(`\n   ✅ All ${totalVulnerabilities} vulnerabilities tested in ${turnCount} turns, ${elapsed}`));
+          if (classSummary) console.log(chalk.gray(`      ${classSummary}`));
+          if (planCreated && agentPlan.length > 0) {
+            const planCompleted = agentPlan.filter(t => t.status === 'completed').length;
+            const planSkipped = agentPlan.filter(t => t.status === 'skipped').length;
+            console.log(chalk.gray(`      📋 Plan: ${planCompleted}/${agentPlan.length} completed${planSkipped ? `, ${planSkipped} skipped` : ''}`));
+          }
           break;
         }
         console.log(chalk.yellow(`\n   ⚠️ Agent has not saved evidence for 15 turns. Remaining: ${totalVulnerabilities - evidenceSavedCount}`));
+        // Reference pending plan tasks if plan exists
+        let pendingHint = '';
+        if (planCreated && agentPlan.length > 0) {
+          const pendingTasks = agentPlan.filter(t => t.status === 'pending' || t.status === 'in_progress');
+          if (pendingTasks.length > 0) {
+            const nextTasks = pendingTasks.slice(0, 3).map(t => `${t.id}: ${t.description}`).join('; ');
+            pendingHint = `\n\nYour plan still has ${pendingTasks.length} unfinished tasks. Next: ${nextTasks}. Call update_plan to mark in_progress, test them, then mark completed.`;
+          }
+        }
         messages.push({
           role: 'user',
-          content: `You have tested ${evidenceSavedCount}/${totalVulnerabilities} vulnerabilities but have not saved any evidence for the last 15 turns. Please continue testing the remaining vulnerabilities and call save_evidence for each one. If you are unable to test them, call save_evidence with success=false and explain why in the evidence field.`
+          content: `You have tested ${evidenceSavedCount}/${totalVulnerabilities} vulnerabilities but have not saved any evidence for the last 15 turns. Please continue testing the remaining vulnerabilities and call save_evidence for each one. If you are unable to test them, call save_evidence with success=false and explain why in the evidence field.${pendingHint}`
         });
         lastEvidenceTurn = turnCount; // Reset stall timer
       }
