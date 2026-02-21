@@ -1,0 +1,36 @@
+{
+  "findingId": "SEMGREP-javascript.express.security.audit.express-check-directory-listing.express-check-directory-listing-server.ts-269-fb4c34599074",
+  "timestamp": "2026-02-21T02:41:33.789Z",
+  "sourceLocation": {
+    "file": "server.ts",
+    "line": 269,
+    "column": null
+  },
+  "vulnerability": {
+    "type": "config",
+    "cwe": "CWE-548",
+    "owasp": "A06:2017 - Security Misconfiguration",
+    "xssType": null,
+    "injectionContext": null,
+    "secretType": null
+  },
+  "exploitation": {
+    "endpoint": "http://localhost:3000/ (and others)",
+    "method": "GET",
+    "payload": "/ , /public/ , /.git/ , /.env , /assets/ (GET requests)",
+    "response": "HTTP 200 for all requests; bodies returned application homepage HTML (starts with \"<!--\\n  ~ Copyright (c) 2014-2026 Bjoern Kimminich & the OWASP Juice Shop contributors.\")",
+    "success": false,
+    "proof": "No directory index content or file listing returned in any response; all responses returned the Juice Shop SPA HTML indicating route catch-all. No sensitive files were disclosed."
+  },
+  "remediation": "If directory listing is unwanted, ensure express.static/serve-index are configured with {index:false} or disable serve-index for sensitive directories. Serve a 403/404 for hidden files or restrict with authentication.",
+  "classification": "NOT_REPRODUCIBLE",
+  "status": "NOT_REPRODUCIBLE",
+  "level": 0,
+  "levelName": "No Exploitation",
+  "confidence": "N/A",
+  "classificationReason": "No evidence of exploitability after exhaustive testing",
+  "includeInReport": false,
+  "requiresAction": false,
+  "ciExitCode": 0,
+  "httpRequestsMade": 5
+}

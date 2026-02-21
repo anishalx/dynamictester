@@ -1,0 +1,36 @@
+{
+  "findingId": "SEMGREP-javascript.sequelize.security.audit.sequelize-injection-express.express-sequelize-injection-login.ts-34-b6ac3a3596e3",
+  "timestamp": "2026-02-21T02:25:23.518Z",
+  "sourceLocation": {
+    "file": "routes/login.ts",
+    "line": 34,
+    "column": 28
+  },
+  "vulnerability": {
+    "type": "SQLi",
+    "cwe": "CWE-89",
+    "owasp": null,
+    "xssType": null,
+    "injectionContext": null,
+    "secretType": null
+  },
+  "exploitation": {
+    "endpoint": "http://localhost:3000/login",
+    "method": "POST",
+    "payload": "' OR '1'='1'-- (also tried other variants in username and password)",
+    "response": "POST /login -> HTTP 200 OK, returned base HTML login page; no SQL errors, no authentication bypass observed.",
+    "success": false,
+    "proof": "Performed confirmation and fingerprint stages against /login endpoint with the following attempts:\n1) POST /login body {\"username\":\"' OR '1'='1'--\",\"password\":\"x\"} -> HTTP 200, base HTML (no login).\n2) POST /login body {\"username\":\"admin\",\"password\":\"' OR '1'='1'--\"} -> HTTP 200, base HTML.\n3) POST /login body {\"username\":\"' UNION SELECT @@version--\",\"password\":\"x\"} -> HTTP 200, base HTML.\n4) POST /login body {\"username\":\"' OR 1=1--\",\"password\":\"irrelevant\"} -> HTTP 200, base HTML.\n\nanalyze_response after each: no DB errors, no version strings, no login success. After 4+ attempts with different techniques, classify NOT_REPRODUCIBLE under current conditions."
+  },
+  "remediation": null,
+  "classification": "NOT_REPRODUCIBLE",
+  "status": "NOT_REPRODUCIBLE",
+  "level": 0,
+  "levelName": "No Exploitation",
+  "confidence": "N/A",
+  "classificationReason": "No evidence of exploitability after exhaustive testing",
+  "includeInReport": false,
+  "requiresAction": false,
+  "ciExitCode": 0,
+  "httpRequestsMade": 4
+}

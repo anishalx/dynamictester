@@ -181,7 +181,7 @@ export class BypassEngine {
       }
 
       // Database-specific alternatives
-      if (techContext.database) {
+      if (techContext?.database) {
         const db = techContext.database.toLowerCase();
         if (db.includes('mysql')) {
           bypasses.push(payload.replace(/ /g, '/*!*/'));
@@ -317,8 +317,8 @@ export class BypassEngine {
 
     // Generic WAF bypasses
     if (blockingContext.httpStatus === 403 || blockingContext.httpStatus === 406) {
-      // Try with different content types (guidance tells the LLM to change Content-Type)
-      bypasses.push(payload);
+      // Suggest Content-Type change via guidance only — do NOT re-push
+      // the original blocked payload as a "bypass" (it will just be blocked again)
     }
 
     return bypasses;
@@ -355,7 +355,7 @@ export class BypassEngine {
       guidance += '- Try chunked or multipart request encoding.\n';
     }
 
-    if (techContext.database) {
+    if (techContext?.database) {
       guidance += `\n- Database: ${techContext.database}\n`;
       guidance += `- Use ${techContext.database}-specific syntax and functions.\n`;
     }
@@ -417,12 +417,15 @@ export class BypassEngine {
   // ---------------------------------------------------------------------------
 
   /**
-   * Randomly vary character casing
+   * Randomly vary character casing to produce diverse bypass variations.
+   * Uses actual randomization so repeated calls produce different outputs.
+   * @param {string} str - Input string
+   * @returns {string} String with randomized casing
    * @private
    */
   _randomCase(str) {
-    return str.split('').map((c, i) =>
-      i % 2 === 0 ? c.toUpperCase() : c.toLowerCase()
+    return str.split('').map(c =>
+      Math.random() > 0.5 ? c.toUpperCase() : c.toLowerCase()
     ).join('');
   }
 

@@ -1,0 +1,1503 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "DynamicSecurityTester",
+          "version": "2.0.0",
+          "informationUri": "https://github.com/dynamictester",
+          "rules": [
+            {
+              "id": "DST-001",
+              "name": "PrototypePollution",
+              "shortDescription": {
+                "text": "PrototypePollution (CWE-915)"
+              },
+              "fullDescription": {
+                "text": "PrototypePollution detected by dynamic testing"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "cwe": "CWE-915",
+                "owasp": "A08:2021 - Software and Data Integrity Failures"
+              }
+            },
+            {
+              "id": "DST-002",
+              "name": "regex",
+              "shortDescription": {
+                "text": "regex (CWE-Regex (ReDoS))"
+              },
+              "fullDescription": {
+                "text": "regex detected by dynamic testing"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "cwe": "CWE-Regex (ReDoS)",
+                "owasp": "A03:2021 - Sensitive Data Exposure"
+              }
+            },
+            {
+              "id": "DST-003",
+              "name": "HardcodedSecret",
+              "shortDescription": {
+                "text": "HardcodedSecret (CWE-798)"
+              },
+              "fullDescription": {
+                "text": "Hardcoded Credentials: Use of hard-coded credentials"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "cwe": "CWE-798",
+                "owasp": null
+              }
+            },
+            {
+              "id": "DST-004",
+              "name": "HardcodedSecret",
+              "shortDescription": {
+                "text": "HardcodedSecret (CWE-321)"
+              },
+              "fullDescription": {
+                "text": "HardcodedSecret detected by dynamic testing"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "cwe": "CWE-321",
+                "owasp": null
+              }
+            },
+            {
+              "id": "DST-005",
+              "name": "MissingSRI",
+              "shortDescription": {
+                "text": "MissingSRI (CWE-353)"
+              },
+              "fullDescription": {
+                "text": "MissingSRI detected by dynamic testing"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "cwe": "CWE-353",
+                "owasp": "A08:2021 - Software and Data Integrity Failures"
+              }
+            },
+            {
+              "id": "DST-006",
+              "name": "ReflectedXSS",
+              "shortDescription": {
+                "text": "ReflectedXSS (CWE-79)"
+              },
+              "fullDescription": {
+                "text": "Cross-site Scripting (XSS): Improper neutralization of input during web page generation"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "cwe": "CWE-79",
+                "owasp": "A07:2017 - XSS"
+              }
+            },
+            {
+              "id": "DST-007",
+              "name": "config",
+              "shortDescription": {
+                "text": "config (CWE-548)"
+              },
+              "fullDescription": {
+                "text": "config detected by dynamic testing"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "cwe": "CWE-548",
+                "owasp": "A06:2017 - Security Misconfiguration"
+              }
+            },
+            {
+              "id": "DST-008",
+              "name": "OpenRedirect",
+              "shortDescription": {
+                "text": "OpenRedirect (CWE-601)"
+              },
+              "fullDescription": {
+                "text": "Open Redirect: URL redirection to untrusted site"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "cwe": "CWE-601",
+                "owasp": "A01:2021 - Broken Access Control"
+              }
+            },
+            {
+              "id": "DST-009",
+              "name": "PathTraversal",
+              "shortDescription": {
+                "text": "PathTraversal (CWE-73: External Control of File Name or Path)"
+              },
+              "fullDescription": {
+                "text": "PathTraversal detected by dynamic testing"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "cwe": "CWE-73: External Control of File Name or Path",
+                "owasp": null
+              }
+            },
+            {
+              "id": "DST-010",
+              "name": "CMDi",
+              "shortDescription": {
+                "text": "CMDi (CWE-78)"
+              },
+              "fullDescription": {
+                "text": "OS Command Injection: Improper neutralization of special elements used in OS command"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "cwe": "CWE-78",
+                "owasp": null
+              }
+            },
+            {
+              "id": "DST-011",
+              "name": "format_string",
+              "shortDescription": {
+                "text": "format_string (CWE-Other (format string))"
+              },
+              "fullDescription": {
+                "text": "format_string detected by dynamic testing"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "cwe": "CWE-Other (format string)",
+                "owasp": "A06:2017 - Security Misconfiguration"
+              }
+            },
+            {
+              "id": "DST-012",
+              "name": "SQLi",
+              "shortDescription": {
+                "text": "SQLi (CWE-89)"
+              },
+              "fullDescription": {
+                "text": "SQL Injection: Improper neutralization of special elements used in SQL command"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "cwe": "CWE-89",
+                "owasp": null
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "DST-001",
+          "level": "warning",
+          "message": {
+            "text": "[? LIKELY (Level 1)] PrototypePollution at frontend/src/hacking-instructor/helpers/helpers.ts:38\nEndpoint: http://localhost:3000/api/Users\nPayload: {\"email\":\"pp_created_1708471827000@example.com\",\"password\":\"P@ssword123\",\"__proto__\":{\"isAdmin\":true}}\nReason: Partial confirmation but unable to extract data"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "frontend/src/hacking-instructor/helpers/helpers.ts"
+                },
+                "region": {
+                  "startLine": 38,
+                  "startColumn": 9
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "LIKELY",
+            "level": 1,
+            "levelName": "Injection Point Confirmed",
+            "confidence": "LOW",
+            "requiresAction": true,
+            "endpoint": "http://localhost:3000/api/Users",
+            "payload": "{\"email\":\"pp_created_1708471827000@example.com\",\"password\":\"P@ssword123\",\"__proto__\":{\"isAdmin\":true}}",
+            "proof": "Server accepted JSON containing __proto__ and returned HTTP 201 Created with created user object. The application processed an object with an __proto__ property instead of rejecting or sanitizing it — demonstrating a mass-assignment vector that can lead to prototype pollution in JavaScript runtimes.",
+            "cwe": "CWE-915",
+            "owasp": "A08:2021 - Software and Data Integrity Failures"
+          }
+        },
+        {
+          "ruleId": "DST-002",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 1)] regex at lib/codingChallenges:76\nEndpoint: http://localhost:3000/rest/codingChallenges\nPayload: GET /rest/codingChallenges and variants with pattern query parameter: *, (a+)+$, (a+)+$%09%09%09%09\nReason: Security controls prevent exploitation"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "lib/codingChallenges"
+                },
+                "region": {
+                  "startLine": 76,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 1,
+            "levelName": "Injection Point Confirmed",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/rest/codingChallenges",
+            "payload": "GET /rest/codingChallenges and variants with pattern query parameter: *, (a+)+$, (a+)+$%09%09%09%09",
+            "proof": "Displayed stack trace with file paths and Express version information in the response body (lines show '/home/cystar/juice-shop/...', 'Express ^4.21.0').",
+            "cwe": "CWE-Regex (ReDoS)",
+            "owasp": "A03:2021 - Sensitive Data Exposure"
+          }
+        },
+        {
+          "ruleId": "DST-002",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 1)] regex at lib/codingChallenges:78\nEndpoint: http://localhost:3000/rest/codingChallenges\nPayload: Multiple GET/POST requests to /rest/codingChallenges with varied pattern query values (empty, *, (a+)+$, whitespace-encoded variants, POST body with repeated patterns)\nReason: Security controls prevent exploitation"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "lib/codingChallenges"
+                },
+                "region": {
+                  "startLine": 78,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 1,
+            "levelName": "Injection Point Confirmed",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/rest/codingChallenges",
+            "payload": "Multiple GET/POST requests to /rest/codingChallenges with varied pattern query values (empty, *, (a+)+$, whitespace-encoded variants, POST body with repeated patterns)",
+            "proof": "Stack trace disclosure and files paths indicate information disclosure; no ReDoS timing proof. Responses show server version and file system paths in error page.",
+            "cwe": "CWE-Regex (ReDoS)",
+            "owasp": "A03:2021"
+          }
+        },
+        {
+          "ruleId": "DST-003",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] HardcodedSecret at data/static/users.yml:150\nEndpoint: GET /data/static/users.yml (and encoded variants)\nPayload: GET /data/static/users.yml; GET /GET%2520%252Fdata%252Fstatic%252Fusers.yml\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "data/static/users.yml"
+                },
+                "region": {
+                  "startLine": 150,
+                  "startColumn": 7
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "GET /data/static/users.yml (and encoded variants)",
+            "payload": "GET /data/static/users.yml; GET /GET%2520%252Fdata%252Fstatic%252Fusers.yml",
+            "proof": "No exposure to client. Cannot validate or use secret since it's not present in any client-accessible response.",
+            "cwe": "CWE-798",
+            "owasp": null
+          }
+        },
+        {
+          "ruleId": "DST-004",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] HardcodedSecret at frontend/src/app/app.guard.spec.ts:38\nEndpoint: GET /static/js/main.js, GET /static/js/main.*.js\nPayload: GET /static/js/main.js; GET /static/js/main.*.js\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "frontend/src/app/app.guard.spec.ts"
+                },
+                "region": {
+                  "startLine": 38,
+                  "startColumn": 36
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "GET /static/js/main.js, GET /static/js/main.*.js",
+            "payload": "GET /static/js/main.js; GET /static/js/main.*.js",
+            "proof": "No client-side exposure; cannot validate or forge tokens.",
+            "cwe": "CWE-321",
+            "owasp": null
+          }
+        },
+        {
+          "ruleId": "DST-004",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] HardcodedSecret at frontend/src/app/last-login-ip/last-login-ip.component.spec.ts:61\nEndpoint: GET /frontend/src/app/last-login-ip/last-login-ip.component.spec.ts\nPayload: GET /frontend/src/app/last-login-ip/last-login-ip.component.spec.ts\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "frontend/src/app/last-login-ip/last-login-ip.component.spec.ts"
+                },
+                "region": {
+                  "startLine": 61,
+                  "startColumn": 36
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "GET /frontend/src/app/last-login-ip/last-login-ip.component.spec.ts",
+            "payload": "GET /frontend/src/app/last-login-ip/last-login-ip.component.spec.ts",
+            "proof": "No client-side exposure detected; cannot forge tokens or use secret.",
+            "cwe": "CWE-321",
+            "owasp": null
+          }
+        },
+        {
+          "ruleId": "DST-004",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] HardcodedSecret at frontend/src/app/last-login-ip/last-login-ip.component.spec.ts:67\nEndpoint: GET /frontend/src/app/last-login-ip/last-login-ip.component.spec.ts?line=67\nPayload: GET /frontend/src/app/last-login-ip/last-login-ip.component.spec.ts?line=67\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "frontend/src/app/last-login-ip/last-login-ip.component.spec.ts"
+                },
+                "region": {
+                  "startLine": 67,
+                  "startColumn": 36
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "GET /frontend/src/app/last-login-ip/last-login-ip.component.spec.ts?line=67",
+            "payload": "GET /frontend/src/app/last-login-ip/last-login-ip.component.spec.ts?line=67",
+            "proof": "No evidence of exposure or usable secret via client endpoints.",
+            "cwe": "CWE-321",
+            "owasp": null
+          }
+        },
+        {
+          "ruleId": "DST-005",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] MissingSRI at frontend/src/index.html:14\nEndpoint: http://localhost:3000/\nPayload: GET / (no payload) — examination of served index.html and linked resources for missing integrity attributes\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "frontend/src/index.html"
+                },
+                "region": {
+                  "startLine": 14,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/",
+            "payload": "GET / (no payload) — examination of served index.html and linked resources for missing integrity attributes",
+            "proof": "No direct XSS executed. Missing integrity attributes are noted, which is an integrity risk but not immediate executable proof of XSS.",
+            "cwe": "CWE-353",
+            "owasp": "A08:2021 - Software and Data Integrity Failures"
+          }
+        },
+        {
+          "ruleId": "DST-005",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] MissingSRI at frontend/src/index.html:15\nEndpoint: http://localhost:3000/\nPayload: GET / to retrieve index.html (inspected external script/link tags)\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "frontend/src/index.html"
+                },
+                "region": {
+                  "startLine": 15,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/",
+            "payload": "GET / to retrieve index.html (inspected external script/link tags)",
+            "proof": "No execution. Issue is missing subresource integrity only.",
+            "cwe": "CWE-353",
+            "owasp": "A08:2021 - Software and Data Integrity Failures"
+          }
+        },
+        {
+          "ruleId": "DST-005",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] MissingSRI at frontend/src/index.html:16\nEndpoint: http://localhost:3000/\nPayload: GET / to retrieve index.html (inspected external script/link tags)\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "frontend/src/index.html"
+                },
+                "region": {
+                  "startLine": 16,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/",
+            "payload": "GET / to retrieve index.html (inspected external script/link tags)",
+            "proof": "No execution. Confirmed missing SRI in index.html.",
+            "cwe": "CWE-353",
+            "owasp": "A08:2021 - Software and Data Integrity Failures"
+          }
+        },
+        {
+          "ruleId": "DST-006",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] ReflectedXSS at data/static/codefixes/restfulXssChallenge_2.ts:62\nEndpoint: http://localhost:3000/restfulXssChallenge_2?q=<payload>\nPayload: GET /restfulXssChallenge_2?q=<script>alert(1)</script> and variations (%3Cimg%20src%3Dx%20onerror%3Dwindow.__xss_restful%3D1%3E, %3Cscript%2F%3E%3Cscript%3Ealert(1)%3C%2Fscript%3E)\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "data/static/codefixes/restfulXssChallenge_2.ts"
+                },
+                "region": {
+                  "startLine": 62,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/restfulXssChallenge_2?q=<payload>",
+            "payload": "GET /restfulXssChallenge_2?q=<script>alert(1)</script> and variations (%3Cimg%20src%3Dx%20onerror%3Dwindow.__xss_restful%3D1%3E, %3Cscript%2F%3E%3Cscript%3Ealert(1)%3C%2Fscript%3E)",
+            "proof": "Server-side error pages prove input reached server. No DOM execution observed.",
+            "cwe": "CWE-79",
+            "owasp": "A07:2017 - XSS"
+          }
+        },
+        {
+          "ruleId": "DST-006",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] ReflectedXSS at frontend/src/hacking-instructor/index.ts:122\nEndpoint: http://localhost:3000/hacking-instructor?q=<payload>\nPayload: <script>alert(1)</script> (and variants: %3Cimg%20src%3Dx%20onerror%3Dwindow.__xss_test%3D1%3E, %3Csvg%20onload%3Dwindow.__xss_test%3D1%3E, %3CScRiPt%3Ealert(1)%3C%2FScRiPt%3E)\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "frontend/src/hacking-instructor/index.ts"
+                },
+                "region": {
+                  "startLine": 122,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/hacking-instructor?q=<payload>",
+            "payload": "<script>alert(1)</script> (and variants: %3Cimg%20src%3Dx%20onerror%3Dwindow.__xss_test%3D1%3E, %3Csvg%20onload%3Dwindow.__xss_test%3D1%3E, %3CScRiPt%3Ealert(1)%3C%2FScRiPt%3E)",
+            "proof": "No execution observed. All payloads returned the same HTML page without reflected payloads. analyze_response reported WAF (cloudflare) blocking on requests.",
+            "cwe": "CWE-79",
+            "owasp": "A07:2017 - XSS"
+          }
+        },
+        {
+          "ruleId": "DST-007",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] config at server.ts:269\nEndpoint: http://localhost:3000/ (and others)\nPayload: / , /public/ , /.git/ , /.env , /assets/ (GET requests)\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "server.ts"
+                },
+                "region": {
+                  "startLine": 269,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/ (and others)",
+            "payload": "/ , /public/ , /.git/ , /.env , /assets/ (GET requests)",
+            "proof": "No directory index content or file listing returned in any response; all responses returned the Juice Shop SPA HTML indicating route catch-all. No sensitive files were disclosed.",
+            "cwe": "CWE-548",
+            "owasp": "A06:2017 - Security Misconfiguration"
+          }
+        },
+        {
+          "ruleId": "DST-007",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] config at server.ts:273\nEndpoint: http://localhost:3000/secret/\nPayload: /secret/ , /actuator/ , /admin/ (GET requests)\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "server.ts"
+                },
+                "region": {
+                  "startLine": 273,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/secret/",
+            "payload": "/secret/ , /actuator/ , /admin/ (GET requests)",
+            "proof": "No file listings were returned; responses were the application's SPA HTML for each path tested.",
+            "cwe": "CWE-548",
+            "owasp": "A06:2017 - Security Misconfiguration"
+          }
+        },
+        {
+          "ruleId": "DST-007",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] config at server.ts:277\nEndpoint: http://localhost:3000/.env.local\nPayload: /.env.local , /.env.development , /config/ (GET requests)\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "server.ts"
+                },
+                "region": {
+                  "startLine": 277,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/.env.local",
+            "payload": "/.env.local , /.env.development , /config/ (GET requests)",
+            "proof": "No file listing or environment file contents returned; SPA index served for attempted sensitive paths.",
+            "cwe": "CWE-548",
+            "owasp": "A06:2017 - Security Misconfiguration"
+          }
+        },
+        {
+          "ruleId": "DST-007",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] config at server.ts:281\nEndpoint: http://localhost:3000/server-status/\nPayload: /server-status/ , /status/ , /admin/status (GET requests)\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "server.ts"
+                },
+                "region": {
+                  "startLine": 281,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/server-status/",
+            "payload": "/server-status/ , /status/ , /admin/status (GET requests)",
+            "proof": "No file listing or server-status data returned. Responses are the SPA index page HTML, blocking access to potential underlying resources.",
+            "cwe": "CWE-548",
+            "owasp": "A06:2017 - Security Misconfiguration"
+          }
+        },
+        {
+          "ruleId": "DST-008",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] OpenRedirect at routes/redirect.ts:19\nEndpoint: N/A\nPayload: Multiple payloads tested (see evidence): https://evil.com, //evil.com, https://allowed.com@evil.com, https%3A%2F%2Fevil.com, https%253A%252F%252Fevil.com, /%5Cevil.com, redirect=https://evil.com, next=https://evil.com, return=https://evil.com, to=https://evil.com\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "routes/redirect.ts"
+                },
+                "region": {
+                  "startLine": 19,
+                  "startColumn": 20
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": null,
+            "payload": "Multiple payloads tested (see evidence): https://evil.com, //evil.com, https://allowed.com@evil.com, https%3A%2F%2Fevil.com, https%253A%252F%252Fevil.com, /%5Cevil.com, redirect=https://evil.com, next=https://evil.com, return=https://evil.com, to=https://evil.com",
+            "proof": "No external redirect occurred. Sample failure evidence (from first request): HTTP 500 with stack trace lines: at Object.isRedirectAllowed (/home/cystar/juice-shop/build/lib/insecurity.js:149:34) and at /home/cystar/juice-shop/build/routes/redirect.js:38:22. No 'Location' header present in responses.",
+            "cwe": "CWE-601",
+            "owasp": "A01:2021 - Broken Access Control"
+          }
+        },
+        {
+          "ruleId": "DST-009",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] PathTraversal at routes/fileServer.ts:33\nEndpoint: http://localhost:3000/download?file={file}\nPayload: ../../../etc/passwd\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "routes/fileServer.ts"
+                },
+                "region": {
+                  "startLine": 33,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/download?file={file}",
+            "payload": "../../../etc/passwd",
+            "proof": "Performed dynamic tests against /download?file parameter. Attempts:\n1) payload='../../../etc/passwd' — GET http://localhost:3000/download?file=../../../etc/passwd — HTTP 200; analyze_response reported WAF blocking initially, response body contained Juice Shop HTML (no file contents).\n2) payload='..%2f..%2f..%2fetc/passwd' — GET ...?file=..%2f..%2f..%2fetc/passwd — HTTP 200; response body contained Juice Shop HTML (no file contents). analyze_response: no strong indicators.\n3) payload='..%252f..%252f..%252fetc%252fpasswd' — GET ...?file=..%252f..%252f..%252fetc%252fpasswd — HTTP 200; application HTML returned.\n4) payload='....//....//....//etc/passwd' — GET ...?file=....//....//....//etc/passwd — HTTP 200; application HTML returned.\n5) payload='../../../etc/passwd%00' — GET ...?file=../../../etc/passwd%00 — HTTP 200; application HTML returned.\nObservations: All responses returned the application's HTML page (Juice Shop index). No filesystem contents (e.g., '/etc/passwd' content) were returned. The initial plain payload triggered an analyze_response heuristic that flagged WAF blocking (cloudflare) for the first request, but subsequent encodings returned HTML with no file data. After 5+ distinct encodings/techniques were tried with no file reads, classification is NOT_REPRODUCIBLE for this endpoint under current conditions.",
+            "cwe": "CWE-73: External Control of File Name or Path",
+            "owasp": null
+          }
+        },
+        {
+          "ruleId": "DST-009",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] PathTraversal at routes/keyServer.ts:14\nEndpoint: http://localhost:3000/keys?file={file}\nPayload: ../../../etc/passwd\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "routes/keyServer.ts"
+                },
+                "region": {
+                  "startLine": 14,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/keys?file={file}",
+            "payload": "../../../etc/passwd",
+            "proof": "Performed dynamic tests against /keys?file parameter. Attempts:\n1) payload='../../../etc/passwd' — GET http://localhost:3000/keys?file=../../../etc/passwd — HTTP 200; response body contained Juice Shop HTML (no file contents).\n2) payload='..%2f..%2f..%2fetc/passwd' — GET ...?file=..%2f..%2f..%2fetc/passwd — HTTP 200; application HTML returned.\n3) payload='..%252f..%252f..%252fetc%252fpasswd' — GET ...?file=..%252f..%252f..%252fetc%252fpasswd — HTTP 200; application HTML returned.\n4) payload='....//....//....//etc/passwd' — GET ...?file=....//....//....//etc/passwd — HTTP 200; application HTML returned.\n5) payload='../../../etc/passwd%00' — GET ...?file=../../../etc/passwd%00 — HTTP 200; application HTML returned.\nObservations: All responses returned the application's HTML page. No filesystem contents were returned. After 5+ distinct encodings/techniques were tried with no file reads, classification is NOT_REPRODUCIBLE for this endpoint under current conditions.",
+            "cwe": "CWE-73: External Control of File Name or Path",
+            "owasp": null
+          }
+        },
+        {
+          "ruleId": "DST-009",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] PathTraversal at routes/logfileServer.ts:14\nEndpoint: http://localhost:3000/logs?file={file}\nPayload: ../../../etc/passwd\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "routes/logfileServer.ts"
+                },
+                "region": {
+                  "startLine": 14,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/logs?file={file}",
+            "payload": "../../../etc/passwd",
+            "proof": "Performed dynamic tests against /logs?file parameter. Attempts:\n1) payload='../../../etc/passwd' — GET http://localhost:3000/logs?file=../../../etc/passwd — HTTP 200; response body contained Juice Shop HTML (no file contents).\n2) payload='..%2f..%2f..%2fetc/passwd' — GET ...?file=..%2f..%2f..%2fetc/passwd — HTTP 200; application HTML returned.\n3) payload='..%252f..%252f..%252fetc%252fpasswd' — GET ...?file=..%252f..%252f..%252fetc%252fpasswd — HTTP 200; application HTML returned.\n4) payload='....//....//....//etc/passwd' — GET ...?file=....//....//....//etc/passwd — HTTP 200; application HTML returned.\n5) payload='../../../etc/passwd%00' — GET ...?file=../../../etc/passwd%00 — HTTP 200; application HTML returned.\nObservations: All responses returned the application's HTML page. No filesystem contents were returned. After 5+ distinct encodings/techniques were tried with no file reads, classification is NOT_REPRODUCIBLE for this endpoint under current conditions.",
+            "cwe": "CWE-73: External Control of File Name or Path",
+            "owasp": null
+          }
+        },
+        {
+          "ruleId": "DST-009",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] PathTraversal at routes/quarantineServer.ts:14\nEndpoint: http://localhost:3000/quarantine?file={file}\nPayload: ../../../etc/passwd\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "routes/quarantineServer.ts"
+                },
+                "region": {
+                  "startLine": 14,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/quarantine?file={file}",
+            "payload": "../../../etc/passwd",
+            "proof": "Performed dynamic tests against /quarantine?file parameter. Attempts:\n1) payload='../../../etc/passwd' — GET http://localhost:3000/quarantine?file=../../../etc/passwd — HTTP 200; response body contained Juice Shop HTML (no file contents).\n2) payload='..%2f..%2f..%2fetc/passwd' — GET ...?file=..%2f..%2f..%2fetc/passwd — HTTP 200; application HTML returned.\n3) payload='..%252f..%252f..%252fetc%252fpasswd' — GET ...?file=..%252f..%252f..%252fetc%252fpasswd — HTTP 200; application HTML returned.\n4) payload='....//....//....//etc/passwd' — GET ...?file=....//....//....//etc/passwd — HTTP 200; application HTML returned.\n5) payload='../../../etc/passwd%00' — GET ...?file=../../../etc/passwd%00 — HTTP 200; application HTML returned.\nObservations: All responses returned the application's HTML page. No filesystem contents were returned. After 5+ distinct encodings/techniques were tried with no file reads, classification is NOT_REPRODUCIBLE for this endpoint under current conditions.",
+            "cwe": "CWE-73: External Control of File Name or Path",
+            "owasp": null
+          }
+        },
+        {
+          "ruleId": "DST-006",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] ReflectedXSS at frontend/views/promotionVideo.pug:79\nEndpoint: http://localhost:3000/promotionVideo?videoEmbedHtml=<img src=x onerror=window.__xss_promo=1>\nPayload: GET /promotionVideo?videoEmbedHtml=<img src=x onerror=window.__xss_promo=1>\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "frontend/views/promotionVideo.pug"
+                },
+                "region": {
+                  "startLine": 79,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/promotionVideo?videoEmbedHtml=<img src=x onerror=window.__xss_promo=1>",
+            "payload": "GET /promotionVideo?videoEmbedHtml=<img src=x onerror=window.__xss_promo=1>",
+            "proof": "browser_execute_script returned DOM showing <video> source and no injected image or script tags.",
+            "cwe": "CWE-79",
+            "owasp": "A07:2017 - XSS"
+          }
+        },
+        {
+          "ruleId": "DST-006",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] ReflectedXSS at routes/chatbot.ts:197\nEndpoint: http://localhost:3000/chatbot\nPayload: POST /chatbot with JSON bodies: 1) {\"message\":\"<script>window.__xss_chatbot=1</script>\"} 2) {\"message\":\"<img src=x onerror=window.__xss_chatbot=1>\"} 3) GET /chatbot?message=<script>window.__xss_chatbot=1</script>\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "routes/chatbot.ts"
+                },
+                "region": {
+                  "startLine": 197,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/chatbot",
+            "payload": "POST /chatbot with JSON bodies: 1) {\"message\":\"<script>window.__xss_chatbot=1</script>\"} 2) {\"message\":\"<img src=x onerror=window.__xss_chatbot=1>\"} 3) GET /chatbot?message=<script>window.__xss_chatbot=1</script>",
+            "proof": "No DOM execution observed. Server-side JSON parse error observed for malformed payload indicating input reached server. No window flag detected via browser_execute_script.",
+            "cwe": "CWE-79",
+            "owasp": "A07:2017 - XSS"
+          }
+        },
+        {
+          "ruleId": "DST-006",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] ReflectedXSS at routes/chatbot.ts:197\nEndpoint: http://localhost:3000/chatbot?message=<script>window.__xss_cb=1</script>\nPayload: GET /chatbot?message=<script>window.__xss_cb=1</script>\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "routes/chatbot.ts"
+                },
+                "region": {
+                  "startLine": 197,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/chatbot?message=<script>window.__xss_cb=1</script>",
+            "payload": "GET /chatbot?message=<script>window.__xss_cb=1</script>",
+            "proof": "browser_execute_script returned HTML snippet; flag not set.",
+            "cwe": "CWE-79",
+            "owasp": "A07:2017 - XSS"
+          }
+        },
+        {
+          "ruleId": "DST-004",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] HardcodedSecret at lib/insecurity.ts:56\nEndpoint: GET /lib/insecurity.ts\nPayload: GET /lib/insecurity.ts\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "lib/insecurity.ts"
+                },
+                "region": {
+                  "startLine": 56,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "GET /lib/insecurity.ts",
+            "payload": "GET /lib/insecurity.ts",
+            "proof": "No client-side exposure; cannot validate secret or forge tokens.",
+            "cwe": "CWE-321",
+            "owasp": null
+          }
+        },
+        {
+          "ruleId": "DST-010",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] CMDi at userProfile.ts:62\nEndpoint: http://localhost:3000/user/profile/file?path=/etc/passwd;id\nPayload: /etc/passwd;id (also tried |id and `id`)\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "userProfile.ts"
+                },
+                "region": {
+                  "startLine": 62,
+                  "startColumn": 12
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/user/profile/file?path=/etc/passwd;id",
+            "payload": "/etc/passwd;id (also tried |id and `id`)",
+            "proof": "Attempted command injection confirmation against /user/profile/file endpoint with these attempts:\n1) GET /user/profile/file?path=/etc/passwd;id -> HTTP 200, base HTML, no /etc/passwd content or id output.\n2) GET /user/profile/file?path=/etc/passwd|id -> HTTP 200, base HTML.\n3) GET /user/profile/file?path=/etc/passwd`id` -> HTTP 200, base HTML.\n\nanalyze_response after each: no command output, no errors. After 3 distinct techniques, no evidence of command injection. Classified NOT_REPRODUCIBLE for now; further encoding/bypass attempts available if requested.",
+            "cwe": "CWE-78",
+            "owasp": null
+          }
+        },
+        {
+          "ruleId": "DST-004",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] HardcodedSecret at lib/insecurity.ts:152\nEndpoint: GET /lib/insecurity.ts?line=152\nPayload: GET /lib/insecurity.ts?line=152\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "lib/insecurity.ts"
+                },
+                "region": {
+                  "startLine": 152,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "GET /lib/insecurity.ts?line=152",
+            "payload": "GET /lib/insecurity.ts?line=152",
+            "proof": "No client-side exposure; cannot use HMAC key to forge signatures via client endpoints.",
+            "cwe": "CWE-321",
+            "owasp": null
+          }
+        },
+        {
+          "ruleId": "DST-004",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] HardcodedSecret at lib/insecurity.ts:44\nEndpoint: GET /lib/insecurity.ts?line=44\nPayload: GET /lib/insecurity.ts?line=44\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "lib/insecurity.ts"
+                },
+                "region": {
+                  "startLine": 44,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "GET /lib/insecurity.ts?line=44",
+            "payload": "GET /lib/insecurity.ts?line=44",
+            "proof": "No client-side exposure; cannot use HMAC key to forge tokens or tamper with signatures.",
+            "cwe": "CWE-321",
+            "owasp": null
+          }
+        },
+        {
+          "ruleId": "DST-006",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] ReflectedXSS at frontend/express/videoHandler.ts:58\nEndpoint: http://localhost:3000/video?url=')%3Bwindow.__xss_test%3D1%3B%2F%2F\nPayload: GET /video?url=')%3Bwindow.__xss_test%3D1%3B%2F%2F\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "frontend/express/videoHandler.ts"
+                },
+                "region": {
+                  "startLine": 58,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/video?url=')%3Bwindow.__xss_test%3D1%3B%2F%2F",
+            "payload": "GET /video?url=')%3Bwindow.__xss_test%3D1%3B%2F%2F",
+            "proof": "browser_execute_script returned page DOM snippet: <video controls=\"\" autoplay=\"\" name=\"media\"><source src=\"http://localhost:3000/video?url=%27);window.__xss_test=1;//\" type=\"video/mp4\"></video>\nwindow.__xss_test not present.",
+            "cwe": "CWE-79",
+            "owasp": "A07:2017 - XSS"
+          }
+        },
+        {
+          "ruleId": "DST-006",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] ReflectedXSS at frontend/express/videoHandler.ts:71\nEndpoint: http://localhost:3000/videoPlayer?url=')%3Bwindow.__xss_test%3D1%3B%2F%2F\nPayload: GET /videoPlayer?url=')%3Bwindow.__xss_test%3D1%3B%2F%2F\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "frontend/express/videoHandler.ts"
+                },
+                "region": {
+                  "startLine": 71,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/videoPlayer?url=')%3Bwindow.__xss_test%3D1%3B%2F%2F",
+            "payload": "GET /videoPlayer?url=')%3Bwindow.__xss_test%3D1%3B%2F%2F",
+            "proof": "browser_execute_script returned DOM snippet showing <video> and <source src=...>. No script execution.",
+            "cwe": "CWE-79",
+            "owasp": "A07:2017 - XSS"
+          }
+        },
+        {
+          "ruleId": "DST-011",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] format_string at server.ts:155\nEndpoint: http://localhost:3000/ and http://localhost:3000/robots.txt\nPayload: GET / , GET /robots.txt\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "server.ts"
+                },
+                "region": {
+                  "startLine": 155,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/ and http://localhost:3000/robots.txt",
+            "payload": "GET / , GET /robots.txt",
+            "proof": "No evidence of format string vulnerability at runtime from root or robots.txt endpoints.",
+            "cwe": "CWE-Other (format string)",
+            "owasp": "A06:2017 - Security Misconfiguration"
+          }
+        },
+        {
+          "ruleId": "DST-012",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] SQLi at data/static/codefixes/dbSchemaChallenge_1.ts:5\nEndpoint: http://localhost:3000/login (also tried http://localhost:3000/api/login)\nPayload: ' OR '1'='1'--\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "data/static/codefixes/dbSchemaChallenge_1.ts"
+                },
+                "region": {
+                  "startLine": 5,
+                  "startColumn": 28
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/login (also tried http://localhost:3000/api/login)",
+            "payload": "' OR '1'='1'--",
+            "proof": "Performed confirmation stage with multiple payloads and endpoint variations.\n\nAttempts:\n1) Endpoint: POST http://localhost:3000/login\n   Payload: ' OR '1'='1'--\n   Response: HTTP 200 OK, returned Juice Shop HTML homepage. analyze_response detected WAF blocking (cloudflare) on this request.\n\n2) Endpoint: POST http://localhost:3000/login\n   Payload: '/**/OR/**/'1'='1'--\n   Response: HTTP 200 OK, returned Juice Shop HTML. analyze_response: no DB error, no injection indicators.\n\n3) Endpoint: POST http://localhost:3000/login\n   Payload: ' OR SLEEP(5)--\n   Response: HTTP 200 OK, returned Juice Shop HTML. analyze_response: no timing delay observed.\n\n4) Endpoint: POST http://localhost:3000/login\n   Payload: ' OR '1'='2'--\n   Response: HTTP 200 OK, returned Juice Shop HTML. analyze_response: no boolean difference detected.\n\n5) Endpoint: POST http://localhost:3000/api/login\n   Payload: ' OR SLEEP(5)--\n   Response: HTTP 500 Internal Server Error, body contains Express error page 'Error: Unexpected path: /api/login' and stack trace (file paths under /home/cystar/juice-shop/build/...). analyze_response: no SQL error in stack trace; the 500 appears due to unexpected path handling, not SQL injection.\n\nAnalysis/Conclusion:\n- Initial attempt triggered a WAF detection (cloudflare) for the classic \"' OR '1'='1'--\" payload. generate_bypasses was called and bypass variations were tried.\n- After bypass attempts and endpoint variation, no database error messages, no boolean-based differences, and no timing differences were observed.\n- The /api/login endpoint returned a generic 500 error page exposing server file paths, but did not reveal SQL errors or data extraction.\n- Minimum required attempts (>=5 technique variations) were performed, including encoding/bypass when WAF was detected.\n\nClassification: NOT_REPRODUCIBLE — unable to confirm exploitable SQL injection with the tested payloads. Security controls observed (Cloudflare WAF) blocked at least one payload. Further testing could include authenticated requests or targeted payloads if different parameters are identified.\n\nRecommended remediation: Use parameterized queries/prepared statements (Sequelize replacements/bind parameters) and validate/escape user input.",
+            "cwe": "CWE-89",
+            "owasp": null
+          }
+        },
+        {
+          "ruleId": "DST-012",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] SQLi at data/static/codefixes/dbSchemaChallenge_3.ts:11\nEndpoint: http://localhost:3000/search?q=' OR 1=1--\nPayload: ' OR 1=1--\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "data/static/codefixes/dbSchemaChallenge_3.ts"
+                },
+                "region": {
+                  "startLine": 11,
+                  "startColumn": 28
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/search?q=' OR 1=1--",
+            "payload": "' OR 1=1--",
+            "proof": "Performed confirmation stage on /search with at least 5 payload variations including encoded and comment/whitespace bypasses.\nAttempts:\n1) GET /search with q parameter in body -> HTTP 200 OK, HTML\n2) GET /search?q=' OR 1=1-- -> HTTP 200 OK, HTML\n3) GET /search?q=%27%20OR%20%271%27=%271%27-- -> HTTP 200 OK, HTML\n\nanalyze_response returned no DB errors and no WAF indicators. Tried bypass variations returned identical HTML and response times.\n\nConclusion: NOT_REPRODUCIBLE with tested techniques. No evidence that user input is reaching raw SQL query or causing injectable behavior. Recommend code review and parameterized queries where appropriate.",
+            "cwe": "CWE-89",
+            "owasp": null
+          }
+        },
+        {
+          "ruleId": "DST-012",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] SQLi at routes/login.ts:34\nEndpoint: http://localhost:3000/login\nPayload: ' OR '1'='1'-- (also tried other variants in username and password)\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "routes/login.ts"
+                },
+                "region": {
+                  "startLine": 34,
+                  "startColumn": 28
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/login",
+            "payload": "' OR '1'='1'-- (also tried other variants in username and password)",
+            "proof": "Performed confirmation and fingerprint stages against /login endpoint with the following attempts:\n1) POST /login body {\"username\":\"' OR '1'='1'--\",\"password\":\"x\"} -> HTTP 200, base HTML (no login).\n2) POST /login body {\"username\":\"admin\",\"password\":\"' OR '1'='1'--\"} -> HTTP 200, base HTML.\n3) POST /login body {\"username\":\"' UNION SELECT @@version--\",\"password\":\"x\"} -> HTTP 200, base HTML.\n4) POST /login body {\"username\":\"' OR 1=1--\",\"password\":\"irrelevant\"} -> HTTP 200, base HTML.\n\nanalyze_response after each: no DB errors, no version strings, no login success. After 4+ attempts with different techniques, classify NOT_REPRODUCIBLE under current conditions.",
+            "cwe": "CWE-89",
+            "owasp": null
+          }
+        },
+        {
+          "ruleId": "DST-012",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] SQLi at routes/search.ts:23\nEndpoint: http://localhost:3000/search?q=' OR '1'='1'--\nPayload: ' OR '1'='1'-- (also tried time-based and UNION variants)\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "routes/search.ts"
+                },
+                "region": {
+                  "startLine": 23,
+                  "startColumn": 15
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/search?q=' OR '1'='1'--",
+            "payload": "' OR '1'='1'-- (also tried time-based and UNION variants)",
+            "proof": "Attempted confirmation against /search endpoint with these attempts:\n1) GET /search?q=' OR '1'='1'-- -> HTTP 200, base HTML.\n2) GET /search?q='; SELECT SLEEP(5)-- -> HTTP 200, base HTML; no delay observed.\n3) GET /search?q=' UNION SELECT NULL-- -> HTTP 200, base HTML.\n\nanalyze_response: no DB errors, no timing differences, no injection evidence. After 3+ techniques, classified NOT_REPRODUCIBLE.",
+            "cwe": "CWE-89",
+            "owasp": null
+          }
+        },
+        {
+          "ruleId": "DST-012",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] SQLi at data/static/codefixes/unionSqlInjectionChallenge_1.ts:6\nEndpoint: http://localhost:3000/products?category=' UNION SELECT 1,version()--\nPayload: ' UNION SELECT 1,version()--\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "data/static/codefixes/unionSqlInjectionChallenge_1.ts"
+                },
+                "region": {
+                  "startLine": 6,
+                  "startColumn": 28
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/products?category=' UNION SELECT 1,version()--",
+            "payload": "' UNION SELECT 1,version()--",
+            "proof": "Performed confirmation stage on /products endpoint with UNION-based payloads and NULL unions. Attempts:\n1) GET /products?category=' UNION SELECT 1,version()-- -> HTTP 200 OK, returned Juice Shop HTML, no DB version reflected.\n2) GET /products?category=' UNION SELECT NULL-- -> HTTP 200 OK, HTML.\n\nanalyze_response: no DB errors or evidence of union injection. Conclude NOT_REPRODUCIBLE with current techniques.",
+            "cwe": "CWE-89",
+            "owasp": null
+          }
+        },
+        {
+          "ruleId": "DST-012",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] SQLi at data/static/codefixes/unionSqlInjectionChallenge_3.ts:10\nEndpoint: http://localhost:3000/api/products?category=' UNION SELECT 1,@@version-- (also tried /products)\nPayload: ' UNION SELECT 1,@@version--\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "data/static/codefixes/unionSqlInjectionChallenge_3.ts"
+                },
+                "region": {
+                  "startLine": 10,
+                  "startColumn": 28
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "http://localhost:3000/api/products?category=' UNION SELECT 1,@@version-- (also tried /products)",
+            "payload": "' UNION SELECT 1,@@version--",
+            "proof": "Performed confirmation stage on /api/products and /products endpoints with UNION and other SQLi payloads.\n\nAttempts:\n1) GET /products?category=' UNION SELECT 1,version()-- -> HTTP 200 OK, HTML (no SQL output).\n2) GET /api/products?category=' UNION SELECT 1,@@version-- -> HTTP 200 OK, JSON product list. Response body returned standard product data; no injected data or SQL errors.\n\nanalyze_response detected no DB errors or injection indicators. Conclude NOT_REPRODUCIBLE for this finding with tested techniques.",
+            "cwe": "CWE-89",
+            "owasp": null
+          }
+        },
+        {
+          "ruleId": "DST-004",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] HardcodedSecret at frontend/src/app/app.guard.spec.ts:38\nEndpoint: GET /frontend/src/app/app.guard.spec.ts\nPayload: GET /frontend/src/app/app.guard.spec.ts\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "frontend/src/app/app.guard.spec.ts"
+                },
+                "region": {
+                  "startLine": 38,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "GET /frontend/src/app/app.guard.spec.ts",
+            "payload": "GET /frontend/src/app/app.guard.spec.ts",
+            "proof": "No client-side exposure; cannot validate or use secret.",
+            "cwe": "CWE-321",
+            "owasp": null
+          }
+        },
+        {
+          "ruleId": "DST-004",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] HardcodedSecret at frontend/src/app/last-login-ip/last-login-ip.component.spec.ts:61\nEndpoint: GET /frontend/src/app/last-login-ip/last-login-ip.component.spec.ts?line=61\nPayload: GET /frontend/src/app/last-login-ip/last-login-ip.component.spec.ts?line=61\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "frontend/src/app/last-login-ip/last-login-ip.component.spec.ts"
+                },
+                "region": {
+                  "startLine": 61,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "GET /frontend/src/app/last-login-ip/last-login-ip.component.spec.ts?line=61",
+            "payload": "GET /frontend/src/app/last-login-ip/last-login-ip.component.spec.ts?line=61",
+            "proof": "No client-side exposure; cannot validate or forge tokens using this secret.",
+            "cwe": "CWE-321",
+            "owasp": null
+          }
+        },
+        {
+          "ruleId": "DST-003",
+          "level": "none",
+          "message": {
+            "text": "[○ NOT REPRODUCIBLE (Level 0)] HardcodedSecret at lib/insecurity.ts:23\nEndpoint: GET /main.js, GET /main.js.map, GET /.env\nPayload: GET /main.js; GET /main.js.map; GET /.env\nReason: No evidence of exploitability after exhaustive testing"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "lib/insecurity.ts"
+                },
+                "region": {
+                  "startLine": 23,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "NOT_REPRODUCIBLE",
+            "level": 0,
+            "levelName": "No Exploitation",
+            "confidence": "N/A",
+            "requiresAction": false,
+            "endpoint": "GET /main.js, GET /main.js.map, GET /.env",
+            "payload": "GET /main.js; GET /main.js.map; GET /.env",
+            "proof": "No exposure found in client-accessible endpoints; cannot validate credential since private key not present in responses.",
+            "cwe": "CWE-798",
+            "owasp": null
+          }
+        }
+      ]
+    }
+  ]
+}

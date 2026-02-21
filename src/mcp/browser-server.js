@@ -1,4 +1,5 @@
 import { chromium } from 'playwright';
+import { existsSync } from 'fs';
 import { AuthManager, getAuthManager } from '../auth/auth-manager.js';
 
 const MAX_CONTENT_LENGTH = 15000; // Max chars to return to avoid token limits
@@ -31,12 +32,49 @@ export class BrowserManager {
     // Without this, requests to localhost / private IPs are blocked even when
     // the user explicitly chose that host as the testing target.
     this._allowedTargetHost = null;
+    this._isContainer = BrowserManager._detectContainer();
+    this._hostOverride = process.env.DYNAMIC_TESTER_HOST_OVERRIDE || null;
     if (options.targetUrl) {
       try {
         const parsed = new URL(options.targetUrl);
         this._allowedTargetHost = parsed.host; // includes port, e.g. "localhost:3000"
       } catch (e) { /* invalid targetUrl — ignore, SSRF checks remain strict */ }
     }
+  }
+
+  static _detectContainer() {
+    if (process.env.DYNAMIC_TESTER_IN_DOCKER === 'true') return true;
+    try {
+      return existsSync('/.dockerenv') || existsSync('/run/.containerenv');
+    } catch {
+      return false;
+    }
+  }
+
+  static _isLocalhost(hostname) {
+    if (!hostname) return false;
+    const lower = hostname.toLowerCase();
+    return lower === 'localhost' || lower === '127.0.0.1' || lower === '::1' || lower === '0.0.0.0';
+  }
+
+  _rewriteLocalhostUrl(urlStr) {
+    if (process.env.DYNAMIC_TESTER_DISABLE_LOCALHOST_REWRITE === 'true') return urlStr;
+    let parsed;
+    try {
+      parsed = new URL(urlStr);
+    } catch {
+      return urlStr;
+    }
+
+    if (!BrowserManager._isLocalhost(parsed.hostname)) return urlStr;
+
+    const overrideHost = this._hostOverride
+      || (this._isContainer ? 'host.docker.internal' : null);
+
+    if (!overrideHost) return urlStr;
+
+    parsed.hostname = overrideHost;
+    return parsed.toString();
   }
 
   async ensureBrowser() {
@@ -622,12 +660,19 @@ export class BrowserManager {
    * @returns {Promise<object>} Status object with response data
    */
   async httpRequest({ url, method = 'GET', headers = {}, body = null, contentType = 'application/json', useAuth = true }) {
+    let effectiveUrl = url;
+    let isLocalhostTarget = false;
     try {
       // Validate URL to prevent SSRF against internal/private networks
       const ssrfCheck = BrowserManager._validateUrlForSSRF(url, this._allowedTargetHost);
       if (!ssrfCheck.safe) {
         return { status: 'error', message: `SSRF protection: ${ssrfCheck.reason}`, url };
       }
+
+      try {
+        const parsedTarget = new URL(url);
+        isLocalhostTarget = BrowserManager._isLocalhost(parsedTarget.hostname);
+      } catch { /* ignore parse error */ }
 
       // Auto-inject auth headers if available and useAuth is true
       const authHeaders = useAuth ? this.authManager.getAuthHeaders() : {};
@@ -679,10 +724,12 @@ export class BrowserManager {
       const timeoutId = setTimeout(() => controller.abort(), 30000);
       fetchOptions.signal = controller.signal;
 
+      effectiveUrl = this._rewriteLocalhostUrl(url);
+
       const startTime = Date.now();
       let response;
       try {
-        response = await fetch(url, fetchOptions);
+        response = await fetch(effectiveUrl, fetchOptions);
       } finally {
         clearTimeout(timeoutId);
       }
@@ -695,9 +742,10 @@ export class BrowserManager {
         json = JSON.parse(text);
       } catch (e) { /* Not JSON */ }
 
-      return {
+      const result = {
         status: 'success',
         url,
+        effectiveUrl,
         method,
         httpStatus: response.status,
         statusText: response.statusText,
@@ -709,8 +757,23 @@ export class BrowserManager {
         responseTimeMs,
         responseTimeSec: (responseTimeMs / 1000).toFixed(3)
       };
+
+      // Add actionable hints for non-2xx status codes so the LLM agent
+      // can adapt its strategy instead of retrying blindly.
+      if (!response.ok) {
+        result.hint = BrowserManager._getStatusHint(response.status, method, url, useAuth && this.authManager.hasAuth());
+      }
+
+      return result;
     } catch (e) {
-      return { status: 'error', message: e.message, url };
+      let message = e.message || String(e);
+      if (/fetch failed/i.test(message) || /econnrefused/i.test(message) || /enotfound/i.test(message)) {
+        const hint = this._isContainer && isLocalhostTarget
+          ? 'Target appears to be localhost from a container. Try using host.docker.internal or set DYNAMIC_TESTER_HOST_OVERRIDE.'
+          : 'Check that the target server is running and reachable.';
+        message = `${message}. ${hint}`;
+      }
+      return { status: 'error', message, url, effectiveUrl };
     }
   }
 
@@ -811,6 +874,57 @@ export class BrowserManager {
     }
 
     return { safe: true };
+  }
+
+  /**
+   * Return an actionable hint for non-2xx HTTP status codes.
+   * Helps the LLM agent adapt its strategy instead of retrying blindly.
+   *
+   * @param {number} status - HTTP status code
+   * @param {string} method - HTTP method used
+   * @param {string} url - The requested URL
+   * @param {boolean} authInjected - Whether auth headers were injected
+   * @returns {string} Human-readable hint for the agent
+   * @private
+   */
+  static _getStatusHint(status, method, url, authInjected) {
+    if (status === 400) {
+      return 'HTTP 400 Bad Request — the server rejected the request format. Check Content-Type header, request body structure, and required fields. Try sending valid JSON or form-encoded data.';
+    }
+    if (status === 401) {
+      if (authInjected) {
+        return 'HTTP 401 Unauthorized — auth token was injected but is expired or invalid. Try browser_navigate to the login page, authenticate, then call browser_capture_auth to refresh tokens.';
+      }
+      return 'HTTP 401 Unauthorized — this endpoint requires authentication. Use browser_navigate to log in first, then call browser_capture_auth to store the token for subsequent requests.';
+    }
+    if (status === 403) {
+      if (authInjected) {
+        return 'HTTP 403 Forbidden — you are authenticated but lack permission for this resource. Try a different user role, or test a different endpoint that the current user can access.';
+      }
+      return 'HTTP 403 Forbidden — access denied. This may require authentication or a specific user role. Try logging in first with browser_capture_auth.';
+    }
+    if (status === 404) {
+      return `HTTP 404 Not Found — the endpoint "${url}" does not exist. Check the URL path for typos. Try discoveredRoutes or derivedEndpoints from the queue data, or use browser_navigate to the app root and look for valid API paths in the page content.`;
+    }
+    if (status === 405) {
+      return `HTTP 405 Method Not Allowed — ${method} is not supported on this endpoint. Try a different HTTP method (GET, POST, PUT, DELETE). Check the Allow header in the response for supported methods.`;
+    }
+    if (status === 415) {
+      return 'HTTP 415 Unsupported Media Type — the server does not accept this Content-Type. Try switching between application/json, application/x-www-form-urlencoded, or multipart/form-data.';
+    }
+    if (status === 422) {
+      return 'HTTP 422 Unprocessable Entity — the request body has valid syntax but invalid semantics. Check required fields, data types, and validation rules. The response body likely contains specific validation errors.';
+    }
+    if (status === 429) {
+      return 'HTTP 429 Too Many Requests — rate limited by the target server. Wait a few seconds before retrying. Reduce request frequency for this endpoint.';
+    }
+    if (status >= 500 && status < 600) {
+      return `HTTP ${status} Server Error — the server encountered an internal error. This could indicate a successful injection that caused an unhandled exception. Check the response body for database error messages, stack traces, or framework error details — these are valuable evidence.`;
+    }
+    if (status >= 300 && status < 400) {
+      return `HTTP ${status} Redirect — the server is redirecting. Check the Location header. This may indicate the endpoint exists but requires authentication (redirect to login).`;
+    }
+    return `HTTP ${status} — unexpected status code. Check the response body for details.`;
   }
 
   getTools() {

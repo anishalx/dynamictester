@@ -1,0 +1,36 @@
+{
+  "findingId": "SEMGREP-html.security.audit.missing-integrity.missing-integrity-index.html-14-82bd1d18883c",
+  "timestamp": "2026-02-21T02:22:14.282Z",
+  "sourceLocation": {
+    "file": "frontend/src/index.html",
+    "line": 14,
+    "column": null
+  },
+  "vulnerability": {
+    "type": "MissingSRI",
+    "cwe": "CWE-353",
+    "owasp": "A08:2021 - Software and Data Integrity Failures",
+    "xssType": null,
+    "injectionContext": "N/A (resource integrity)",
+    "secretType": null
+  },
+  "exploitation": {
+    "endpoint": "http://localhost:3000/",
+    "method": "GET",
+    "payload": "GET / (no payload) — examination of served index.html and linked resources for missing integrity attributes",
+    "response": null,
+    "success": false,
+    "proof": "No direct XSS executed. Missing integrity attributes are noted, which is an integrity risk but not immediate executable proof of XSS."
+  },
+  "remediation": null,
+  "classification": "NOT_REPRODUCIBLE",
+  "status": "NOT_REPRODUCIBLE",
+  "level": 0,
+  "levelName": "No Exploitation",
+  "confidence": "N/A",
+  "classificationReason": "No evidence of exploitability after exhaustive testing",
+  "includeInReport": false,
+  "requiresAction": false,
+  "ciExitCode": 0,
+  "httpRequestsMade": 1
+}

@@ -1,0 +1,2335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dynamic Security Test Report</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --success: #22c55e;
+      --error: #ef4444;
+      --warning: #f59e0b;
+      --info: #3b82f6;
+      --border: #334155;
+      --likely: #f97316;
+      --blocked: #a855f7;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 2rem;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+    header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1.5rem;
+      margin-bottom: 2rem;
+    }
+    h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    h2 { font-size: 1.5rem; margin-bottom: 1rem; }
+    .executive-summary {
+      background: var(--card);
+      border-radius: 12px;
+      padding: 1.5rem 2rem;
+      margin: 1.5rem 0;
+      border-left: 4px solid #f59e0b;
+    }
+    .executive-summary h3 { margin-bottom: 0.75rem; font-size: 1.2rem; }
+    .risk-badge {
+      display: inline-block;
+      padding: 0.25rem 1rem;
+      border-radius: 9999px;
+      font-size: 0.875rem;
+      font-weight: 700;
+      background: #f59e0b;
+      color: white;
+      margin-left: 0.5rem;
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.75rem;
+      margin-top: 1rem;
+    }
+    .summary-item { font-size: 0.9rem; }
+    .summary-item .label { color: var(--muted); }
+    .stats {
+      display: flex;
+      gap: 1rem;
+      margin-top: 1rem;
+      flex-wrap: wrap;
+    }
+    .stat {
+      background: var(--card);
+      padding: 1rem 1.5rem;
+      border-radius: 8px;
+      text-align: center;
+      min-width: 120px;
+    }
+    .stat-value { font-size: 2rem; font-weight: 700; }
+    .stat-value.confirmed { color: var(--error); }
+    .stat-value.likely { color: var(--likely); }
+    .stat-value.blocked { color: var(--blocked); }
+    .stat-value.tested { color: var(--warning); }
+    .stat-value.safe { color: var(--success); }
+    .stat-label { color: var(--muted); font-size: 0.75rem; }
+    .findings { display: flex; flex-direction: column; gap: 1rem; }
+    .finding {
+      background: var(--card);
+      border-radius: 8px;
+      padding: 1.5rem;
+      border-left: 4px solid var(--border);
+    }
+    .finding.confirmed { border-left-color: var(--error); }
+    .finding.likely { border-left-color: var(--likely); }
+    .finding.blocked { border-left-color: var(--blocked); }
+    .finding-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 1rem;
+    }
+    .finding-title { font-weight: 600; font-size: 1.1rem; }
+    .badge {
+      padding: 0.25rem 0.75rem;
+      border-radius: 9999px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .badge.confirmed { background: var(--error); color: white; }
+    .badge.likely { background: var(--likely); color: white; }
+    .badge.blocked { background: var(--blocked); color: white; }
+    .badge.not-reproducible { background: var(--border); color: var(--muted); }
+    .level-indicator {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 0.25rem;
+    }
+    .location {
+      font-family: 'Fira Code', monospace;
+      background: var(--bg);
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      margin: 0.5rem 0;
+      font-size: 0.875rem;
+    }
+    .details { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-top: 1rem; }
+    .detail-item label { color: var(--muted); font-size: 0.75rem; display: block; }
+    .detail-item span { font-family: monospace; }
+    .payload {
+      background: var(--bg);
+      padding: 0.75rem;
+      border-radius: 4px;
+      font-family: monospace;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .proof {
+      margin-top: 1rem;
+      padding: 1rem;
+      background: rgba(239, 68, 68, 0.1);
+      border-radius: 4px;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+    .remediation {
+      margin-top: 1rem;
+      padding: 1rem;
+      background: rgba(34, 197, 94, 0.1);
+      border-radius: 4px;
+      border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+    .classification-reason {
+      margin-top: 0.75rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+      font-style: italic;
+    }
+    footer {
+      margin-top: 3rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      text-align: center;
+      font-size: 0.875rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Dynamic Security Test Report</h1>
+      <p style="color: var(--muted);">Generated: 2026-02-21T02:46:38.044Z</p>
+      <p style="color: var(--muted);">Target:  http://localhost:3000</p>
+
+      <div class="executive-summary">
+        <h3>Executive Summary <span class="risk-badge">MEDIUM RISK</span></h3>
+        <p>Tested <strong>40</strong> static analysis findings against the live application.</p>
+        <div class="summary-grid">
+          <div class="summary-item"><span class="label">Confirmed exploitable:</span> <strong style="color: var(--error);">0</strong> (0.0%)</div>
+          <div class="summary-item"><span class="label">Likely exploitable:</span> <strong style="color: var(--likely);">1</strong> (2.5%)</div>
+          <div class="summary-item"><span class="label">Blocked (untestable):</span> <strong style="color: var(--blocked);">0</strong></div>
+          <div class="summary-item"><span class="label">False positives removed:</span> <strong style="color: var(--success);">39</strong> (97.5%)</div>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-value confirmed">0</div>
+          <div class="stat-label">Confirmed</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value likely">1</div>
+          <div class="stat-label">Likely</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value blocked">0</div>
+          <div class="stat-label">Blocked</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value safe">39</div>
+          <div class="stat-label">Not Reproducible</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value tested">40</div>
+          <div class="stat-label">Total Tested</div>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <h2>Findings</h2>
+      <div class="findings">
+        
+    <div class="finding likely">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">PrototypePollution - CWE-915</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop-helpers.ts-38-0df7db9b0ff3</div>
+          <div class="level-indicator">Level 1: Injection Point Confirmed (LOW)</div>
+        </div>
+        <span class="badge likely">Likely</span>
+      </div>
+
+      <div class="location">
+        frontend/src/hacking-instructor/helpers/helpers.ts:38:9
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/api/Users</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>POST</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A08:2021 - Software and Data Integrity Failures</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-915</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">{&quot;email&quot;:&quot;pp_created_1708471827000@example.com&quot;,&quot;password&quot;:&quot;P@ssword123&quot;,&quot;__proto__&quot;:{&quot;isAdmin&quot;:true}}</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          Partial confirmation but unable to extract data
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>Whitelist allowed fields and explicitly remove/ignore __proto__, constructor, prototype keys; avoid Object.assign from untrusted input; use safe merging libraries.</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">regex - CWE-Regex (ReDoS)</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp-codingChallenges.ts-76-0dd3074431de</div>
+          <div class="level-indicator">Level 1: Injection Point Confirmed (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        lib/codingChallenges:76:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/rest/codingChallenges</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A03:2021 - Sensitive Data Exposure</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-Regex (ReDoS)</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">GET /rest/codingChallenges and variants with pattern query parameter: *, (a+)+$, (a+)+$%09%09%09%09</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          Security controls prevent exploitation
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>Sanitize and validate user-supplied regex/pattern input. Do not expose stack traces in production; handle errors gracefully and return generic error messages. Limit regex complexity and execution time.</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">regex - CWE-Regex (ReDoS)</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp-codingChallenges.ts-78-de2e4ced5550</div>
+          <div class="level-indicator">Level 1: Injection Point Confirmed (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        lib/codingChallenges:78:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/rest/codingChallenges</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET/POST</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A03:2021</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-Regex (ReDoS)</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">Multiple GET/POST requests to /rest/codingChallenges with varied pattern query values (empty, *, (a+)+$, whitespace-encoded variants, POST body with repeated patterns)</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          Security controls prevent exploitation
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>Validate and limit regex complexity; catch exceptions and return generic errors; disable stack trace exposure in production.</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">HardcodedSecret - CWE-798</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-generic.secrets.security.detected-generic-secret.detected-generic-secret-users.yml-150-fee7e4ac633d</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        data/static/users.yml:150:7
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>GET /data/static/users.yml (and encoded variants)</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-798</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">GET /data/static/users.yml; GET /GET%2520%252Fdata%252Fstatic%252Fusers.yml</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>Do not store secrets in repository files; use environment variables or secret store; ensure static files are not served publicly.</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">HardcodedSecret - CWE-321</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-generic.secrets.security.detected-jwt-token.detected-jwt-token-app.guard.spec.ts-38-bc5b74143122</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        frontend/src/app/app.guard.spec.ts:38:36
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>GET /static/js/main.js, GET /static/js/main.*.js</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-321</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">GET /static/js/main.js; GET /static/js/main.*.js</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>Remove hardcoded JWT secrets from source/test files; use env vars or secret manager; ensure build artifacts do not include secrets.</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">HardcodedSecret - CWE-321</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-generic.secrets.security.detected-jwt-token.detected-jwt-token-last-login-ip.component.spec.ts-61-9e53cd805df8</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        frontend/src/app/last-login-ip/last-login-ip.component.spec.ts:61:36
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>GET /frontend/src/app/last-login-ip/last-login-ip.component.spec.ts</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-321</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">GET /frontend/src/app/last-login-ip/last-login-ip.component.spec.ts</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>Ensure test files with secrets are not committed; rotate any secrets in repo.</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">HardcodedSecret - CWE-321</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-generic.secrets.security.detected-jwt-token.detected-jwt-token-last-login-ip.component.spec.ts-67-84259942caee</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        frontend/src/app/last-login-ip/last-login-ip.component.spec.ts:67:36
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>GET /frontend/src/app/last-login-ip/last-login-ip.component.spec.ts?line=67</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-321</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">GET /frontend/src/app/last-login-ip/last-login-ip.component.spec.ts?line=67</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>Remove secrets from test files and rotate if necessary.</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">MissingSRI - CWE-353</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-html.security.audit.missing-integrity.missing-integrity-index.html-14-82bd1d18883c</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        frontend/src/index.html:14:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A08:2021 - Software and Data Integrity Failures</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-353</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">GET / (no payload) — examination of served index.html and linked resources for missing integrity attributes</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">MissingSRI - CWE-353</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-html.security.audit.missing-integrity.missing-integrity-index.html-15-1de42f83917a</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        frontend/src/index.html:15:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A08:2021 - Software and Data Integrity Failures</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-353</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">GET / to retrieve index.html (inspected external script/link tags)</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">MissingSRI - CWE-353</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-html.security.audit.missing-integrity.missing-integrity-index.html-16-19b54f79eb93</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        frontend/src/index.html:16:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A08:2021 - Software and Data Integrity Failures</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-353</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">GET / to retrieve index.html (inspected external script/link tags)</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">ReflectedXSS - CWE-79</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.audit.detect-replaceall-sanitization.detect-replaceall-sanitization-restfulXssChallenge_2.ts-62-21e45b25a3f9</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        data/static/codefixes/restfulXssChallenge_2.ts:62:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/restfulXssChallenge_2?q=&lt;payload&gt;</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A07:2017 - XSS</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-79</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">GET /restfulXssChallenge_2?q=&lt;script&gt;alert(1)&lt;/script&gt; and variations (%3Cimg%20src%3Dx%20onerror%3Dwindow.__xss_restful%3D1%3E, %3Cscript%2F%3E%3Cscript%3Ealert(1)%3C%2Fscript%3E)</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">ReflectedXSS - CWE-79</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.browser.security.insecure-document-method.insecure-document-method-index.ts-122-e78d9b2533ae</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        frontend/src/hacking-instructor/index.ts:122:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/hacking-instructor?q=&lt;payload&gt;</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A07:2017 - XSS</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-79</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">&lt;script&gt;alert(1)&lt;/script&gt; (and variants: %3Cimg%20src%3Dx%20onerror%3Dwindow.__xss_test%3D1%3E, %3Csvg%20onload%3Dwindow.__xss_test%3D1%3E, %3CScRiPt%3Ealert(1)%3C%2FScRiPt%3E)</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">config - CWE-548</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.express.security.audit.express-check-directory-listing.express-check-directory-listing-server.ts-269-fb4c34599074</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        server.ts:269:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/ (and others)</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A06:2017 - Security Misconfiguration</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-548</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">/ , /public/ , /.git/ , /.env , /assets/ (GET requests)</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>If directory listing is unwanted, ensure express.static/serve-index are configured with {index:false} or disable serve-index for sensitive directories. Serve a 403/404 for hidden files or restrict with authentication.</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">config - CWE-548</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.express.security.audit.express-check-directory-listing.express-check-directory-listing-server.ts-273-074e54f9cf75</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        server.ts:273:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/secret/</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A06:2017 - Security Misconfiguration</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-548</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">/secret/ , /actuator/ , /admin/ (GET requests)</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>If directory listing is not desired ensure express.static is not configured with serve-index; restrict or reject access to dotfiles and hidden paths</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">config - CWE-548</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.express.security.audit.express-check-directory-listing.express-check-directory-listing-server.ts-277-e5492aa1f8b4</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        server.ts:277:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/.env.local</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A06:2017 - Security Misconfiguration</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-548</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">/.env.local , /.env.development , /config/ (GET requests)</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>Ensure static file serving does not expose dotfiles, and disable serve-index or configure express.static to deny dotfiles.</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">config - CWE-548</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.express.security.audit.express-check-directory-listing.express-check-directory-listing-server.ts-281-75d8fc520445</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        server.ts:281:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/server-status/</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A06:2017 - Security Misconfiguration</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-548</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">/server-status/ , /status/ , /admin/status (GET requests)</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>Ensure dotfiles and internal endpoints are not served; restrict static file serving and disable directory indexing.</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">OpenRedirect - CWE-601</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.express.security.audit.express-open-redirect.express-open-redirect-redirect.ts-19-64416fc93769</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        routes/redirect.ts:19:20
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A01:2021 - Broken Access Control</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-601</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">Multiple payloads tested (see evidence): https://evil.com, //evil.com, https://allowed.com@evil.com, https%3A%2F%2Fevil.com, https%253A%252F%252Fevil.com, /%5Cevil.com, redirect=https://evil.com, next=https://evil.com, return=https://evil.com, to=https://evil.com</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>Ensure isRedirectAllowed gracefully handles undefined config and validate redirect targets against an allow-list. Return a safe default or show an error rather than crashing.</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">PathTraversal - CWE-73: External Control of File Name or Path</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.express.security.audit.express-res-sendfile.express-res-sendfile-fileServer.ts-33-35e96b8d8d62</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        routes/fileServer.ts:33:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/download?file={file}</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-73: External Control of File Name or Path</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">../../../etc/passwd</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>Validate and canonicalize user-supplied paths; use safe path join and restrict to allowed directory; avoid passing raw user input to res.sendFile.</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">PathTraversal - CWE-73: External Control of File Name or Path</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.express.security.audit.express-res-sendfile.express-res-sendfile-keyServer.ts-14-133f16636457</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        routes/keyServer.ts:14:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/keys?file={file}</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-73: External Control of File Name or Path</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">../../../etc/passwd</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>Validate and canonicalize user-supplied paths; use safe path join and restrict to allowed directory; avoid passing raw user input to res.sendFile.</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">PathTraversal - CWE-73: External Control of File Name or Path</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.express.security.audit.express-res-sendfile.express-res-sendfile-logfileServer.ts-14-57234c5ec539</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        routes/logfileServer.ts:14:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/logs?file={file}</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-73: External Control of File Name or Path</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">../../../etc/passwd</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>Validate and canonicalize user-supplied paths; use safe path join and restrict to allowed directory; avoid passing raw user input to res.sendFile.</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">PathTraversal - CWE-73: External Control of File Name or Path</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.express.security.audit.express-res-sendfile.express-res-sendfile-quarantineServer.ts-14-c824198ed25a</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        routes/quarantineServer.ts:14:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/quarantine?file={file}</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-73: External Control of File Name or Path</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">../../../etc/passwd</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>Validate and canonicalize user-supplied paths; use safe path join and restrict to allowed directory; avoid passing raw user input to res.sendFile.</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">ReflectedXSS - CWE-79</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.express.security.audit.xss.pug.explicit-unescape.template-explicit-unescape-promotionVideo.pug-79-3be11d7526cb</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        frontend/views/promotionVideo.pug:79:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/promotionVideo?videoEmbedHtml=&lt;img src=x onerror=window.__xss_promo=1&gt;</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A07:2017 - XSS</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-79</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">GET /promotionVideo?videoEmbedHtml=&lt;img src=x onerror=window.__xss_promo=1&gt;</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">ReflectedXSS - CWE-79</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.express.security.injection.raw-html-format.raw-html-format-chatbot.ts-197-eb5dbcdf73ea</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        routes/chatbot.ts:197:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/chatbot</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>POST/GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A07:2017 - XSS</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-79</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">POST /chatbot with JSON bodies: 1) {&quot;message&quot;:&quot;&lt;script&gt;window.__xss_chatbot=1&lt;/script&gt;&quot;} 2) {&quot;message&quot;:&quot;&lt;img src=x onerror=window.__xss_chatbot=1&gt;&quot;} 3) GET /chatbot?message=&lt;script&gt;window.__xss_chatbot=1&lt;/script&gt;</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">ReflectedXSS - CWE-79</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.express.security.injection.raw-html-format.raw-html-format-chatbot.ts-197-eb5dbcdf73ea</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        routes/chatbot.ts:197:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/chatbot?message=&lt;script&gt;window.__xss_cb=1&lt;/script&gt;</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A07:2017 - XSS</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-79</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">GET /chatbot?message=&lt;script&gt;window.__xss_cb=1&lt;/script&gt;</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">HardcodedSecret - CWE-321</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.jsonwebtoken.security.jwt-hardcode.hardcoded-jwt-secret-insecurity.ts-56-ef63b9ac89e0</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        lib/insecurity.ts:56:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>GET /lib/insecurity.ts</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-321</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">GET /lib/insecurity.ts</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>Remove hardcoded JWT secrets from server code and use env vars or secret manager.</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">CMDi - CWE-78</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.lang.security.audit.code-string-concat.code-string-concat-userProfile.ts-62-905c59c5bf17</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        userProfile.ts:62:12
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/user/profile/file?path=/etc/passwd;id</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-78</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">/etc/passwd;id (also tried |id and `id`)</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">HardcodedSecret - CWE-321</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.lang.security.audit.hardcoded-hmac-key.hardcoded-hmac-key-insecurity.ts-152-505f4c50d830</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        lib/insecurity.ts:152:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>GET /lib/insecurity.ts?line=152</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-321</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">GET /lib/insecurity.ts?line=152</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>Use environment variables or secret management for HMAC keys; rotate keys if used.</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">HardcodedSecret - CWE-321</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.lang.security.audit.hardcoded-hmac-key.hardcoded-hmac-key-insecurity.ts-44-e7e07b922606</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        lib/insecurity.ts:44:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>GET /lib/insecurity.ts?line=44</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-321</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">GET /lib/insecurity.ts?line=44</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>Replace hardcoded keys with environment-configured secrets and rotate keys if used in production.</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">ReflectedXSS - CWE-79</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.lang.security.audit.unknown-value-with-script-tag.unknown-value-with-script-tag-videoHandler.ts-58-c51ad9784049</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        frontend/express/videoHandler.ts:58:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/video?url=&#039;)%3Bwindow.__xss_test%3D1%3B%2F%2F</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A07:2017 - XSS</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-79</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">GET /video?url=&#039;)%3Bwindow.__xss_test%3D1%3B%2F%2F</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">ReflectedXSS - CWE-79</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.lang.security.audit.unknown-value-with-script-tag.unknown-value-with-script-tag-videoHandler.ts-71-a7bc618bf1ee</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        frontend/express/videoHandler.ts:71:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/videoPlayer?url=&#039;)%3Bwindow.__xss_test%3D1%3B%2F%2F</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A07:2017 - XSS</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-79</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">GET /videoPlayer?url=&#039;)%3Bwindow.__xss_test%3D1%3B%2F%2F</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">format_string - CWE-Other (format string)</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring-server.ts-155-ad1017eb349a</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        server.ts:155:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/ and http://localhost:3000/robots.txt</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>A06:2017 - Security Misconfiguration</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-Other (format string)</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">GET / , GET /robots.txt</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>Locate and sanitize formatting functions; use parameterized logging or templates that escape input. Avoid printf-style uncontrolled format strings.</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">SQLi - CWE-89</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.sequelize.security.audit.sequelize-injection-express.express-sequelize-injection-dbSchemaChallenge_1.ts-5-a094fdbc2c6e</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        data/static/codefixes/dbSchemaChallenge_1.ts:5:28
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/login (also tried http://localhost:3000/api/login)</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>POST</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-89</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">&#039; OR &#039;1&#039;=&#039;1&#039;--</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">SQLi - CWE-89</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.sequelize.security.audit.sequelize-injection-express.express-sequelize-injection-dbSchemaChallenge_3.ts-11-b591f319c8f7</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        data/static/codefixes/dbSchemaChallenge_3.ts:11:28
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/search?q=&#039; OR 1=1--</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-89</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">&#039; OR 1=1--</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">SQLi - CWE-89</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.sequelize.security.audit.sequelize-injection-express.express-sequelize-injection-login.ts-34-b6ac3a3596e3</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        routes/login.ts:34:28
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/login</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>POST</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-89</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">&#039; OR &#039;1&#039;=&#039;1&#039;-- (also tried other variants in username and password)</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">SQLi - CWE-89</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.sequelize.security.audit.sequelize-injection-express.express-sequelize-injection-search.ts-23-91f8430ce69a</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        routes/search.ts:23:15
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/search?q=&#039; OR &#039;1&#039;=&#039;1&#039;--</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-89</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">&#039; OR &#039;1&#039;=&#039;1&#039;-- (also tried time-based and UNION variants)</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">SQLi - CWE-89</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.sequelize.security.audit.sequelize-injection-express.express-sequelize-injection-unionSqlInjectionChallenge_1.ts-6-9506ffa901e1</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        data/static/codefixes/unionSqlInjectionChallenge_1.ts:6:28
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/products?category=&#039; UNION SELECT 1,version()--</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-89</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">&#039; UNION SELECT 1,version()--</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">SQLi - CWE-89</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">SEMGREP-javascript.sequelize.security.audit.sequelize-injection-express.express-sequelize-injection-unionSqlInjectionChallenge_3.ts-10-92310305e973</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        data/static/codefixes/unionSqlInjectionChallenge_3.ts:10:28
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>http://localhost:3000/api/products?category=&#039; UNION SELECT 1,@@version-- (also tried /products)</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-89</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">&#039; UNION SELECT 1,@@version--</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">HardcodedSecret - CWE-321</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">TRIVY-jwt-token-app.guard.spec.ts-38-b9372bd99742</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        frontend/src/app/app.guard.spec.ts:38:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>GET /frontend/src/app/app.guard.spec.ts</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-321</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">GET /frontend/src/app/app.guard.spec.ts</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>Remove test secrets and rotate any impacted credentials.</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">HardcodedSecret - CWE-321</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">TRIVY-jwt-token-last-login-ip.component.spec.ts-61-d19b553d7aa4</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        frontend/src/app/last-login-ip/last-login-ip.component.spec.ts:61:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>GET /frontend/src/app/last-login-ip/last-login-ip.component.spec.ts?line=61</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-321</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">GET /frontend/src/app/last-login-ip/last-login-ip.component.spec.ts?line=61</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>Remove secrets from tests and rotate any impacted secrets.</div>
+        </div>
+      
+    </div>
+  
+
+    <div class="finding ">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">HardcodedSecret - CWE-798</div>
+          <div style="color: var(--muted); font-size: 0.875rem;">TRIVY-private-key-insecurity.ts-23-fa619258bce9</div>
+          <div class="level-indicator">Level 0: No Exploitation (N/A)</div>
+        </div>
+        <span class="badge not-reproducible">Not Reproducible</span>
+      </div>
+
+      <div class="location">
+        lib/insecurity.ts:23:?
+      </div>
+
+      <div class="details">
+        <div class="detail-item">
+          <label>Endpoint</label>
+          <span>GET /main.js, GET /main.js.map, GET /.env</span>
+        </div>
+        <div class="detail-item">
+          <label>Method</label>
+          <span>GET</span>
+        </div>
+        <div class="detail-item">
+          <label>OWASP</label>
+          <span>N/A</span>
+        </div>
+        <div class="detail-item">
+          <label>CWE</label>
+          <span>CWE-798</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <label style="color: var(--muted); font-size: 0.75rem; display: block; margin-bottom: 0.25rem;">Payload</label>
+        <div class="payload">GET /main.js; GET /main.js.map; GET /.env</div>
+      </div>
+
+      
+
+      
+        <div class="classification-reason">
+          No evidence of exploitability after exhaustive testing
+        </div>
+      
+
+      
+        <div class="remediation">
+          <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Remediation</label>
+          <div>Remove hardcoded private keys from source; use secure key storage and environment variables.</div>
+        </div>
+      
+    </div>
+  
+      </div>
+    </main>
+
+    <footer>
+      <p>Generated by Dynamic Security Tester v2.0</p>
+    </footer>
+  </div>
+</body>
+</html>

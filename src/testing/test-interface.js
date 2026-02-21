@@ -87,6 +87,7 @@ export class VulnerabilityTester {
   classify(evidence) {
     if (evidence.level >= 3) return 'CONFIRMED';
     if (evidence.externalBlocker) return 'BLOCKED';
+    if (evidence.securityBlocker) return 'NOT_REPRODUCIBLE';
     if (evidence.level >= 1) return 'LIKELY';
     return 'NOT_REPRODUCIBLE';
   }

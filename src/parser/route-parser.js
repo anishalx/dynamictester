@@ -297,20 +297,25 @@ export class RouteParser {
 export function enrichWithRouteInfo(vulnerabilities, routeMapping) {
   return vulnerabilities.map(vuln => {
     const enriched = { ...vuln };
-    
-    if (!vuln.file) return enriched;
+
+    // NormalizedVulnerability stores file at vuln.location.file, but queue
+    // entries may also have a top-level vuln.file. Support both.
+    const vulnFile = vuln.location?.file || vuln.file;
+    const vulnLine = vuln.location?.line || vuln.line;
+
+    if (!vulnFile) return enriched;
 
     // Try to find matching routes
     const matchingRoutes = routeMapping.routes.filter(route => {
-      const fileMatch = route.file.includes(vuln.file) || vuln.file.includes(route.file);
+      const fileMatch = route.file.includes(vulnFile) || vulnFile.includes(route.file);
       return fileMatch;
     });
     
     if (matchingRoutes.length > 0) {
       // Sort by line proximity if vulnerability has line info
-      if (vuln.line) {
+      if (vulnLine) {
         matchingRoutes.sort((a, b) => 
-          Math.abs(a.line - vuln.line) - Math.abs(b.line - vuln.line)
+          Math.abs(a.line - vulnLine) - Math.abs(b.line - vulnLine)
         );
       }
       
@@ -324,7 +329,7 @@ export function enrichWithRouteInfo(vulnerabilities, routeMapping) {
       enriched.suggestedMethod = matchingRoutes[0].method;
     } else {
       // Fall back to path-based derivation
-      enriched.derivedEndpoints = RouteParser.deriveEndpointsFromPath(vuln.file);
+      enriched.derivedEndpoints = RouteParser.deriveEndpointsFromPath(vulnFile);
     }
     
     return enriched;

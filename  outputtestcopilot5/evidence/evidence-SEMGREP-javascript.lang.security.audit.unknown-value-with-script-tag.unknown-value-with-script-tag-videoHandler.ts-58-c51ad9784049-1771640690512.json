@@ -1,0 +1,36 @@
+{
+  "findingId": "SEMGREP-javascript.lang.security.audit.unknown-value-with-script-tag.unknown-value-with-script-tag-videoHandler.ts-58-c51ad9784049",
+  "timestamp": "2026-02-21T02:24:50.512Z",
+  "sourceLocation": {
+    "file": "frontend/express/videoHandler.ts",
+    "line": 58,
+    "column": null
+  },
+  "vulnerability": {
+    "type": "ReflectedXSS",
+    "cwe": "CWE-79",
+    "owasp": "A07:2017 - XSS",
+    "xssType": "DOM",
+    "injectionContext": "Attribute (src) / media resource",
+    "secretType": null
+  },
+  "exploitation": {
+    "endpoint": "http://localhost:3000/video?url=')%3Bwindow.__xss_test%3D1%3B%2F%2F",
+    "method": "GET",
+    "payload": "GET /video?url=')%3Bwindow.__xss_test%3D1%3B%2F%2F",
+    "response": "HTTP 200, content-type video/mp4; DOM shows <video><source src=\"...\"/></video>",
+    "success": false,
+    "proof": "browser_execute_script returned page DOM snippet: <video controls=\"\" autoplay=\"\" name=\"media\"><source src=\"http://localhost:3000/video?url=%27);window.__xss_test=1;//\" type=\"video/mp4\"></video>\nwindow.__xss_test not present."
+  },
+  "remediation": null,
+  "classification": "NOT_REPRODUCIBLE",
+  "status": "NOT_REPRODUCIBLE",
+  "level": 0,
+  "levelName": "No Exploitation",
+  "confidence": "N/A",
+  "classificationReason": "No evidence of exploitability after exhaustive testing",
+  "includeInReport": false,
+  "requiresAction": false,
+  "ciExitCode": 0,
+  "httpRequestsMade": 2
+}

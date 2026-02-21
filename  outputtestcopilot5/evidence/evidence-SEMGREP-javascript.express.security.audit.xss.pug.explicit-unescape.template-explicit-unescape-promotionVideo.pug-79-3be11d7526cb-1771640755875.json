@@ -1,0 +1,36 @@
+{
+  "findingId": "SEMGREP-javascript.express.security.audit.xss.pug.explicit-unescape.template-explicit-unescape-promotionVideo.pug-79-3be11d7526cb",
+  "timestamp": "2026-02-21T02:25:55.875Z",
+  "sourceLocation": {
+    "file": "frontend/views/promotionVideo.pug",
+    "line": 79,
+    "column": null
+  },
+  "vulnerability": {
+    "type": "ReflectedXSS",
+    "cwe": "CWE-79",
+    "owasp": "A07:2017 - XSS",
+    "xssType": "Reflected",
+    "injectionContext": "Template unescape expected, but runtime places input into media src attribute (Attribute/URL context)",
+    "secretType": null
+  },
+  "exploitation": {
+    "endpoint": "http://localhost:3000/promotionVideo?videoEmbedHtml=<img src=x onerror=window.__xss_promo=1>",
+    "method": "GET",
+    "payload": "GET /promotionVideo?videoEmbedHtml=<img src=x onerror=window.__xss_promo=1>",
+    "response": "HTTP 200, HTML contains <video> element; no injection detected",
+    "success": false,
+    "proof": "browser_execute_script returned DOM showing <video> source and no injected image or script tags."
+  },
+  "remediation": null,
+  "classification": "NOT_REPRODUCIBLE",
+  "status": "NOT_REPRODUCIBLE",
+  "level": 0,
+  "levelName": "No Exploitation",
+  "confidence": "N/A",
+  "classificationReason": "No evidence of exploitability after exhaustive testing",
+  "includeInReport": false,
+  "requiresAction": false,
+  "ciExitCode": 0,
+  "httpRequestsMade": 1
+}

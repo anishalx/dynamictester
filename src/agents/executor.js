@@ -19,7 +19,7 @@ import { VulnerabilityClassifier } from '../testing/classifier.js';
 import { formatLevel } from '../testing/exploitation-levels.js';
 
 // Maximum characters for tool results to avoid token limits
-const MAX_TOOL_RESULT_LENGTH = 8000;
+const MAX_TOOL_RESULT_LENGTH = 15000;
 
 // Maximum number of messages before pruning old context
 const MAX_MESSAGES_BEFORE_PRUNE = 80;
@@ -27,11 +27,15 @@ const MAX_MESSAGES_BEFORE_PRUNE = 80;
 // Number of recent messages to preserve when pruning
 const MESSAGES_TO_KEEP = 30;
 
-// Maximum agent turns before stopping the exploitation loop
-const MAX_AGENT_TURNS = 75;
+// Minimum agent turns before stopping the exploitation loop.
+// Actual budget is scaled dynamically: max(MIN_AGENT_TURNS, totalVulnerabilities * TURNS_PER_VULN).
+const MIN_AGENT_TURNS = 75;
+
+// Estimated turns needed per vulnerability (plan + generate_payloads + HTTP requests + analyze + save_evidence + plan update).
+const TURNS_PER_VULN = 12;
 
 // Default stagger delay (ms) between parallel agent starts
-const DEFAULT_STAGGER_DELAY = 2000;
+const DEFAULT_STAGGER_DELAY = 1000;
 
 // Default max retries for parallel agent execution
 const DEFAULT_PARALLEL_RETRIES = 3;
@@ -65,23 +69,82 @@ function isFreeTierModel(modelId) {
 
 /**
  * Prune old messages from the conversation to prevent context window overflow.
- * Keeps the system message, a summary of older context, and the most recent messages.
+ * Keeps the system message, a structured progress summary, and the most recent messages.
  * @param {Array<object>} messages - The conversation messages array
+ * @param {object} [progress] - Current agent progress state
+ * @param {number} [progress.evidenceSavedCount=0] - How many vulns have evidence saved
+ * @param {number} [progress.totalVulnerabilities=0] - Total vulns in the queue
+ * @param {Array<{id: string, description: string, status: string, notes?: string}>} [progress.agentPlan] - Current plan tasks
+ * @param {object} [progress.classificationCounts] - Counts by classification status
  * @returns {Array<object>} Pruned messages array
  */
-function pruneMessages(messages) {
+function pruneMessages(messages, progress = {}) {
   if (messages.length <= MAX_MESSAGES_BEFORE_PRUNE) return messages;
 
   const systemMsg = messages[0]; // Always keep system message
   const recentMessages = messages.slice(-MESSAGES_TO_KEEP);
   const prunedCount = messages.length - MESSAGES_TO_KEEP - 1;
 
-  // Create a summary of what was pruned
+  const {
+    evidenceSavedCount = 0,
+    totalVulnerabilities = 0,
+    agentPlan = [],
+    classificationCounts = {}
+  } = progress;
+
+  // Build structured progress summary so the agent knows exactly where it stands
+  const parts = [
+    `[CONTEXT NOTE: ${prunedCount} older messages were pruned to fit context window.]`,
+    '',
+    `PROGRESS: ${evidenceSavedCount}/${totalVulnerabilities} vulnerabilities tested.`
+  ];
+
+  // Classification breakdown
+  const clsEntries = Object.entries(classificationCounts).filter(([, v]) => v > 0);
+  if (clsEntries.length > 0) {
+    const clsSummary = clsEntries.map(([k, v]) => `${k}: ${v}`).join(', ');
+    parts.push(`Classifications so far: ${clsSummary}`);
+  }
+
+  // Plan-based task status (which vulns are done, which remain)
+  if (agentPlan.length > 0) {
+    const completed = agentPlan.filter(t => t.status === 'completed');
+    const pending = agentPlan.filter(t => t.status === 'pending');
+    const inProgress = agentPlan.filter(t => t.status === 'in_progress');
+    const skipped = agentPlan.filter(t => t.status === 'skipped');
+
+    if (completed.length > 0) {
+      const completedList = completed.map(t => {
+        const notes = t.notes ? ` (${t.notes})` : '';
+        return `${t.id}${notes}`;
+      }).join(', ');
+      parts.push(`COMPLETED (${completed.length}): ${completedList}`);
+    }
+
+    if (inProgress.length > 0) {
+      parts.push(`IN PROGRESS: ${inProgress.map(t => `${t.id}: ${t.description}`).join('; ')}`);
+    }
+
+    if (pending.length > 0) {
+      const pendingList = pending.slice(0, 10).map(t => `${t.id}: ${t.description}`).join('; ');
+      const more = pending.length > 10 ? ` (and ${pending.length - 10} more)` : '';
+      parts.push(`PENDING (${pending.length}): ${pendingList}${more}`);
+    }
+
+    if (skipped.length > 0) {
+      parts.push(`SKIPPED (${skipped.length}): ${skipped.map(t => t.id).join(', ')}`);
+    }
+  }
+
+  const remaining = totalVulnerabilities - evidenceSavedCount;
+  if (remaining > 0) {
+    parts.push('');
+    parts.push(`ACTION REQUIRED: ${remaining} vulnerabilities remain. Resume testing from the next pending task in your plan. Do NOT re-test completed vulnerabilities.`);
+  }
+
   const summaryMsg = {
     role: 'user',
-    content: `[CONTEXT NOTE: ${prunedCount} older messages were summarized to fit context window. ` +
-      `You have been testing vulnerabilities. Continue where you left off — ` +
-      `check the most recent tool results and evidence save calls to see your progress.]`
+    content: parts.join('\n')
   };
 
   return [systemMsg, summaryMsg, ...recentMessages];
@@ -215,6 +278,25 @@ RULE 6 — NO TEXT-ONLY RESPONSES:
   Every response must include at least one tool call. Never respond with only text.
 
 ═══════════════════════════════════════════════════════════════════
+ENDPOINT DISCOVERY — How to find the right URL for each vulnerability
+═══════════════════════════════════════════════════════════════════
+
+Each vulnerability in the queue may include pre-analyzed endpoint data.
+Use them in this priority order:
+
+1. suggestedEndpoint + suggestedMethod: Pre-derived from route analysis. Use FIRST if present.
+2. discoveredRoutes: Array of {method, path} found by parsing Express/Koa/Fastify router files.
+   Pick the route closest to the vulnerability's source file and line.
+3. derivedEndpoints: Endpoints derived from the source file path heuristics.
+4. Manual derivation: If none of the above are present, derive from the file path:
+   - routes/login.ts → /login or /api/login
+   - controllers/user.js → /api/users or /users
+   - data/static/codefixes/ → may not have a direct endpoint (check for related API routes)
+
+If the first endpoint returns 404, try alternatives from discoveredRoutes or derivedEndpoints
+before giving up. Check the 'hint' field in browser_http_request responses for recovery guidance.
+
+═══════════════════════════════════════════════════════════════════
 TOOL REFERENCE
 ═══════════════════════════════════════════════════════════════════
 
@@ -225,6 +307,11 @@ TOOL REFERENCE
 - analyze_response: Call AFTER each test request (detects DB errors, WAF, injection indicators)
 - generate_bypasses: Call when a payload is BLOCKED (returns encoded/obfuscated alternatives)
 - browser_navigate / browser_click / browser_force_click: For UI-based testing
+- browser_type_and_submit: Type text into input and press Enter (useful for search boxes, login forms)
+- browser_capture_auth: Call AFTER successful login to capture JWT/session tokens for subsequent requests
+- browser_clear_auth: Clear stored auth — use when testing unauthenticated access or switching credentials
+- browser_get_auth_status: Check what auth tokens are currently stored and will be injected
+- browser_screenshot: Take screenshot for visual evidence (useful after confirmed exploitation)
 - save_evidence: Call AFTER testing — include actual HTTP response, source mapping, observed behavior
 
 ═══════════════════════════════════════════════════════════════════
@@ -717,11 +804,44 @@ If the system nudges you about stalls, check your plan for pending tasks and res
       }
 
       const data = await fs.readJSON(resolvedPath);
-      // Return all vulnerabilities with summary stats
-      const count = data.vulnerabilities?.length || 0;
-      data.totalCount = count;
-      data.note = `Loaded ${count} vulnerabilities. You MUST test ALL of them.`;
-      return { status: 'success', data };
+      const vulns = data.vulnerabilities || [];
+      const count = vulns.length;
+
+      // Return compact vulnerability entries with endpoint info to avoid truncation
+      const compactVulns = vulns.map(v => {
+        const entry = {
+          id: v.id,
+          vulnerabilityType: v.vulnerabilityType,
+          severity: v.severity,
+          file: v.file,
+          line: v.line,
+          snippet: (v.snippet || '').slice(0, 200),
+          description: (v.description || '').slice(0, 150),
+          cwe: v.cwe,
+          witnessPayload: v.witnessPayload
+        };
+        // Include endpoint data when available (from RouteParser enrichment)
+        if (v.suggestedEndpoint) {
+          entry.suggestedEndpoint = v.suggestedEndpoint;
+          entry.suggestedMethod = v.suggestedMethod || 'GET';
+        }
+        if (v.discoveredRoutes && v.discoveredRoutes.length > 0) {
+          entry.discoveredRoutes = v.discoveredRoutes.slice(0, 5);
+        }
+        if (v.derivedEndpoints && v.derivedEndpoints.length > 0) {
+          entry.derivedEndpoints = v.derivedEndpoints;
+        }
+        return entry;
+      });
+
+      return {
+        status: 'success',
+        data: {
+          totalCount: count,
+          note: `Loaded ${count} vulnerabilities. You MUST test ALL of them. Use suggestedEndpoint/suggestedMethod when available. Otherwise derive the endpoint from the file path.`,
+          vulnerabilities: compactVulns
+        }
+      };
     } catch (e) {
       return { status: 'error', message: e.message };
     }
@@ -1035,7 +1155,8 @@ Start NOW by calling read_queue_file.`
   ];
 
   let turnCount = 0;
-  const maxTurns = MAX_AGENT_TURNS;
+  const maxTurns = Math.max(MIN_AGENT_TURNS, totalVulnerabilities * TURNS_PER_VULN);
+  console.log(chalk.gray(`   Turn budget: ${maxTurns} (${totalVulnerabilities} vulns × ${TURNS_PER_VULN} turns/vuln, min ${MIN_AGENT_TURNS})`));
   let consecutiveErrors = 0;
   const maxConsecutiveErrors = 5;
   let consecutiveNudges = 0;
@@ -1267,7 +1388,12 @@ Start NOW by calling read_queue_file.`
       // Prune messages if context is growing too large
       if (messages.length > MAX_MESSAGES_BEFORE_PRUNE) {
         const before = messages.length;
-        const pruned = pruneMessages(messages);
+        const pruned = pruneMessages(messages, {
+          evidenceSavedCount,
+          totalVulnerabilities,
+          agentPlan,
+          classificationCounts
+        });
         messages.length = 0;
         messages.push(...pruned);
         console.log(chalk.gray(`   Context pruned: ${before} → ${messages.length} messages`));
@@ -1563,8 +1689,8 @@ Start NOW by calling read_queue_file.`
         }
       } else {
         // Model responded with text only — no tool calls
-        // Accept completion only if the agent has saved evidence for at least some vulnerabilities
-        if (evidenceSavedCount > 0) {
+        // Only accept completion if ALL vulnerabilities have been tested
+        if (evidenceSavedCount >= totalVulnerabilities && totalVulnerabilities > 0) {
           const elapsed = formatDuration(Date.now() - agentStartTime);
           const classSummary = Object.entries(classificationCounts)
             .filter(([, v]) => v > 0)
@@ -1580,6 +1706,28 @@ Start NOW by calling read_queue_file.`
             console.log(chalk.gray(`      📋 Plan: ${planCompleted}/${agentPlan.length} completed${planSkipped ? `, ${planSkipped} skipped` : ''}`));
           }
           break;
+        } else if (evidenceSavedCount > 0 && evidenceSavedCount < totalVulnerabilities) {
+          // Agent tried to stop early — nudge it to continue
+          const remaining = totalVulnerabilities - evidenceSavedCount;
+          let pendingHint = '';
+          if (planCreated && agentPlan.length > 0) {
+            const pendingTasks = agentPlan.filter(t => t.status === 'pending' || t.status === 'in_progress');
+            if (pendingTasks.length > 0) {
+              const nextTasks = pendingTasks.slice(0, 3).map(t => `${t.id}: ${t.description}`).join('; ');
+              pendingHint = ` Next tasks: ${nextTasks}`;
+            }
+          }
+          console.log(chalk.yellow(`\n   ⚠️ Agent tried to stop with ${remaining} vulnerabilities remaining`));
+          messages.push({
+            role: 'user',
+            content: `You have only tested ${evidenceSavedCount}/${totalVulnerabilities} vulnerabilities. You MUST continue testing the remaining ${remaining}. Do NOT stop until all vulnerabilities have been tested with save_evidence.${pendingHint} Use browser_http_request to test and save_evidence for each remaining vulnerability NOW.`
+          });
+          consecutiveNudges++;
+          if (consecutiveNudges > maxNudges + 2) {
+            console.log(chalk.yellow(`   Accepting partial completion after ${consecutiveNudges} nudges`));
+            break;
+          }
+          continue;
         }
 
         // Agent has NOT saved any evidence — nudge it to keep working
@@ -1608,8 +1756,8 @@ Start NOW by calling read_queue_file.`
         continue; // Re-enter the loop to retry with the nudge message
       }
 
-      // Check for stop reason after tool execution — only break if we've done real work
-      if (response.choices[0].finish_reason === 'stop' && evidenceSavedCount > 0) {
+      // Check for stop reason after tool execution — only break if ALL vulns tested
+      if (response.choices[0].finish_reason === 'stop' && evidenceSavedCount >= totalVulnerabilities && totalVulnerabilities > 0) {
         const elapsed = formatDuration(Date.now() - agentStartTime);
         const classSummary = Object.entries(classificationCounts)
           .filter(([, v]) => v > 0)
@@ -1625,6 +1773,14 @@ Start NOW by calling read_queue_file.`
           console.log(chalk.gray(`      📋 Plan: ${planCompleted}/${agentPlan.length} completed${planSkipped ? `, ${planSkipped} skipped` : ''}`));
         }
         break;
+      } else if (response.choices[0].finish_reason === 'stop' && evidenceSavedCount > 0 && evidenceSavedCount < totalVulnerabilities) {
+        // Agent stopped with tool calls but hasn't finished all vulns — nudge
+        const remaining = totalVulnerabilities - evidenceSavedCount;
+        console.log(chalk.yellow(`\n   ⚠️ Agent stopped after ${evidenceSavedCount}/${totalVulnerabilities} — nudging to continue (${remaining} remaining)`));
+        messages.push({
+          role: 'user',
+          content: `You tested ${evidenceSavedCount}/${totalVulnerabilities} vulnerabilities but stopped. ${remaining} remain. Continue testing NOW — call generate_payloads and browser_http_request for the next untested vulnerability, then save_evidence. Do NOT stop until all ${totalVulnerabilities} are done.`
+        });
       }
 
       // Stall detection: if we've saved some evidence but haven't saved any in

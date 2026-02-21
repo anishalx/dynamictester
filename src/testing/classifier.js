@@ -271,7 +271,8 @@ export class VulnerabilityClassifier {
     };
 
     for (const result of classifications) {
-      summary.byLevel[result.level] = (summary.byLevel[result.level] || 0) + 1;
+      const level = Number.isFinite(result.level) ? Math.min(Math.max(result.level, 0), 4) : 0;
+      summary.byLevel[level] = (summary.byLevel[level] || 0) + 1;
 
       switch (result.classification) {
         case 'CONFIRMED':

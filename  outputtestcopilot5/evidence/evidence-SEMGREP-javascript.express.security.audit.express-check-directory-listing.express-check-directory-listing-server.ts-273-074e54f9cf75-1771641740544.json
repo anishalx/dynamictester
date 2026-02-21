@@ -1,0 +1,36 @@
+{
+  "findingId": "SEMGREP-javascript.express.security.audit.express-check-directory-listing.express-check-directory-listing-server.ts-273-074e54f9cf75",
+  "timestamp": "2026-02-21T02:42:20.544Z",
+  "sourceLocation": {
+    "file": "server.ts",
+    "line": 273,
+    "column": null
+  },
+  "vulnerability": {
+    "type": "config",
+    "cwe": "CWE-548",
+    "owasp": "A06:2017 - Security Misconfiguration",
+    "xssType": null,
+    "injectionContext": null,
+    "secretType": null
+  },
+  "exploitation": {
+    "endpoint": "http://localhost:3000/secret/",
+    "method": "GET",
+    "payload": "/secret/ , /actuator/ , /admin/ (GET requests)",
+    "response": "HTTP 200; served app HTML for /secret/ (same as homepage)",
+    "success": false,
+    "proof": "No file listings were returned; responses were the application's SPA HTML for each path tested."
+  },
+  "remediation": "If directory listing is not desired ensure express.static is not configured with serve-index; restrict or reject access to dotfiles and hidden paths",
+  "classification": "NOT_REPRODUCIBLE",
+  "status": "NOT_REPRODUCIBLE",
+  "level": 0,
+  "levelName": "No Exploitation",
+  "confidence": "N/A",
+  "classificationReason": "No evidence of exploitability after exhaustive testing",
+  "includeInReport": false,
+  "requiresAction": false,
+  "ciExitCode": 0,
+  "httpRequestsMade": 1
+}

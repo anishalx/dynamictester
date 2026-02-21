@@ -94,6 +94,7 @@ export async function generateExploitationQueue(vulnerabilities, outputDir) {
 
   // Group vulnerabilities by type
   for (const vuln of vulnList) {
+    if (!vuln || typeof vuln !== 'object') continue; // Skip malformed entries
     const rawType = vuln.type || 'other';
     
     // Guard against prototype pollution — only allow known queue types, route unknown to 'other'
@@ -125,7 +126,11 @@ export async function generateExploitationQueue(vulnerabilities, outputDir) {
       cve: vuln.cve,
       witnessPayload: generateWitnessPayload(vuln),
       reference: vuln.reference,
-      metadata: vuln.metadata
+      metadata: vuln.metadata,
+      suggestedEndpoint: vuln.suggestedEndpoint || null,
+      suggestedMethod: vuln.suggestedMethod || null,
+      discoveredRoutes: vuln.discoveredRoutes || [],
+      derivedEndpoints: vuln.derivedEndpoints || []
     });
   }
   
@@ -189,6 +194,12 @@ function generateWitnessPayload(vuln) {
   }
   if (subType === 'NoSQLi') {
     return '{"$gt":""}';
+  }
+  if (subType === 'HeaderInjection') {
+    return "test\r\nX-Injected: true";
+  }
+  if (subType === 'ELInjection') {
+    return "${7*7}";
   }
   
   // XSS payloads

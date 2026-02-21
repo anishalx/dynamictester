@@ -1,0 +1,36 @@
+{
+  "findingId": "TRIVY-private-key-insecurity.ts-23-fa619258bce9",
+  "timestamp": "2026-02-21T02:31:20.415Z",
+  "sourceLocation": {
+    "file": "lib/insecurity.ts",
+    "line": 23,
+    "column": null
+  },
+  "vulnerability": {
+    "type": "HardcodedSecret",
+    "cwe": "CWE-798",
+    "owasp": null,
+    "xssType": null,
+    "injectionContext": null,
+    "secretType": "PrivateKey"
+  },
+  "exploitation": {
+    "endpoint": "GET /main.js, GET /main.js.map, GET /.env",
+    "method": "GET",
+    "payload": "GET /main.js; GET /main.js.map; GET /.env",
+    "response": "main.js -> HTTP 200 (application/javascript), body contains application code; main.js.map -> HTTP 200 (text/html index), body contains HTML index; /.env -> HTTP 200 (text/html index), body contains HTML index",
+    "success": false,
+    "proof": "No exposure found in client-accessible endpoints; cannot validate credential since private key not present in responses."
+  },
+  "remediation": "Remove hardcoded private keys from source; use secure key storage and environment variables.",
+  "classification": "NOT_REPRODUCIBLE",
+  "status": "NOT_REPRODUCIBLE",
+  "level": 0,
+  "levelName": "No Exploitation",
+  "confidence": "N/A",
+  "classificationReason": "No evidence of exploitability after exhaustive testing",
+  "includeInReport": false,
+  "requiresAction": false,
+  "ciExitCode": 0,
+  "httpRequestsMade": 3
+}

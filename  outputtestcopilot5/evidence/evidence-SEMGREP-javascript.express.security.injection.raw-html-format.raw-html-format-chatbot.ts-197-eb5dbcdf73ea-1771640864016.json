@@ -1,0 +1,36 @@
+{
+  "findingId": "SEMGREP-javascript.express.security.injection.raw-html-format.raw-html-format-chatbot.ts-197-eb5dbcdf73ea",
+  "timestamp": "2026-02-21T02:27:44.016Z",
+  "sourceLocation": {
+    "file": "routes/chatbot.ts",
+    "line": 197,
+    "column": null
+  },
+  "vulnerability": {
+    "type": "ReflectedXSS",
+    "cwe": "CWE-79",
+    "owasp": "A07:2017 - XSS",
+    "xssType": "Reflected",
+    "injectionContext": "Expected raw HTML but runtime places input into media src attribute",
+    "secretType": null
+  },
+  "exploitation": {
+    "endpoint": "http://localhost:3000/chatbot?message=<script>window.__xss_cb=1</script>",
+    "method": "GET",
+    "payload": "GET /chatbot?message=<script>window.__xss_cb=1</script>",
+    "response": "HTTP 200, HTML with <video> element; no injected script",
+    "success": false,
+    "proof": "browser_execute_script returned HTML snippet; flag not set."
+  },
+  "remediation": null,
+  "classification": "NOT_REPRODUCIBLE",
+  "status": "NOT_REPRODUCIBLE",
+  "level": 0,
+  "levelName": "No Exploitation",
+  "confidence": "N/A",
+  "classificationReason": "No evidence of exploitability after exhaustive testing",
+  "includeInReport": false,
+  "requiresAction": false,
+  "ciExitCode": 0,
+  "httpRequestsMade": 1
+}

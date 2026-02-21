@@ -7,7 +7,8 @@ import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { parseStaticAnalysisResults } from './parser/result-parser.js';
 import { generateExploitationQueue } from './queue/queue-generator.js';
-import { executeExploitationAgent } from './agents/executor.js';
+import { createRouteParser, enrichWithRouteInfo } from './parser/route-parser.js';
+import { executeExploitationAgent, executeAgentsInParallel } from './agents/executor.js';
 import { path, fs } from 'zx';
 import { getSupportedAnalyzers } from './parser/parser-factory.js';
 import { generateSarifReport, generateHtmlReport, generateDeveloperSummary, generateAllReports } from './reporting/report-generator.js';
@@ -325,7 +326,27 @@ async function main() {
 
     // Step 2: Generate exploitation queues
     console.log(chalk.blue('\n📋 Step 2: Generating exploitation queues...'));
-    const queues = await generateExploitationQueue(vulnerabilities, outputDir);
+    // Step 1.5: Enrich vulnerabilities with route/endpoint information
+    let enrichedVulns = vulnerabilities;
+    try {
+      const repoPath = resultPaths[0] ? path.dirname(path.resolve(resultPaths[0])) : process.cwd();
+      const routeSourceDir = process.env.DYNAMIC_TESTER_REPO_PATH || repoPath;
+      console.log(chalk.blue(`\n📋 Step 1.5: Discovering API routes from source code...`));
+      const routeParser = createRouteParser();
+      const routeMapping = await routeParser.parseDirectory(routeSourceDir);
+      if (routeMapping.routes.length > 0) {
+        console.log(chalk.green(`   ✓ Discovered ${routeMapping.routes.length} routes across ${routeMapping.summary.files.length} files`));
+        enrichedVulns = enrichWithRouteInfo(vulnerabilities, routeMapping);
+        const withEndpoints = enrichedVulns.filter(v => v.suggestedEndpoint || (v.derivedEndpoints && v.derivedEndpoints.length > 0));
+        console.log(chalk.green(`   ✓ Matched endpoints for ${withEndpoints.length}/${vulnerabilities.length} vulnerabilities`));
+      } else {
+        console.log(chalk.yellow(`   ⚠️ No Express routes found in ${routeSourceDir}. Agent will derive endpoints from file paths.`));
+      }
+    } catch (routeError) {
+      console.log(chalk.yellow(`   ⚠️ Route discovery failed: ${routeError.message}. Agent will derive endpoints from file paths.`));
+    }
+
+    const queues = await generateExploitationQueue(enrichedVulns, outputDir);
     
     // Step 3: Execute exploitation agents
     console.log(chalk.blue('\n📋 Step 3: Reviewing vulnerabilities...'));
@@ -349,6 +370,9 @@ async function main() {
       dependency: 'exploit-generic.txt',
       other: 'exploit-generic.txt'
     };
+
+    const plannedAgents = [];
+    const warnings = [];
 
     for (const [type, queue] of Object.entries(queues)) {
       if (queue.length > 0) {
@@ -381,7 +405,7 @@ async function main() {
           const queuePath = path.resolve(outputDir, 'deliverables', `${type}_exploitation_queue.json`);
           const promptFile = promptMapping[type] || 'exploit-generic.txt';
           const promptPath = path.resolve(process.cwd(), 'prompts', promptFile);
-          
+
           if (!(await fs.pathExists(promptPath))) {
             console.log(chalk.yellow(`⚠️ Prompt template not found: ${promptFile}. Using generic prompt.`));
             const genericPromptPath = path.resolve(process.cwd(), 'prompts', 'exploit-generic.txt');
@@ -390,19 +414,39 @@ async function main() {
             }
           }
 
-          const result = await executeExploitationAgent(
-            await fs.pathExists(promptPath) ? promptPath : path.resolve(process.cwd(), 'prompts', 'exploit-generic.txt'),
+          plannedAgents.push({
+            promptTemplate: await fs.pathExists(promptPath)
+              ? promptPath
+              : path.resolve(process.cwd(), 'prompts', 'exploit-generic.txt'),
             queuePath,
             targetUrl,
             outputDir,
-            { model: modelId, client, providerName, providerConfig, fallbackProviders }
-          );
-          
-          if (result.success) {
-            console.log(chalk.green(`✅ ${type} exploitation completed in ${result.turns} turns`));
-          } else {
-            console.log(chalk.red(`❌ ${type} exploitation failed: ${result.error}`));
-          }
+            name: `${type}-agent`,
+            model: modelId
+          });
+        }
+      }
+    }
+
+    if (plannedAgents.length > 0) {
+      const maxParallelAgents = Number(process.env.DYNAMIC_TESTER_MAX_PARALLEL_AGENTS || 3);
+      const parallelLimit = Number.isFinite(maxParallelAgents) && maxParallelAgents > 0
+        ? Math.floor(maxParallelAgents)
+        : 3;
+
+      console.log(chalk.cyan(`\n🚀 Running ${plannedAgents.length} exploitation agent(s) with parallel limit ${parallelLimit}...`));
+
+      for (let i = 0; i < plannedAgents.length; i += parallelLimit) {
+        const batch = plannedAgents.slice(i, i + parallelLimit);
+        const results = await executeAgentsInParallel(batch, {
+          model: modelId,
+          client,
+          providerName,
+          providerConfig,
+          fallbackProviders
+        });
+        if (results.failed > 0) {
+          warnings.push(`${results.failed} exploitation agent(s) failed`);
         }
       }
     }
@@ -452,7 +496,11 @@ async function main() {
       }
     }
     
-    console.log(chalk.green.bold('\n🎉 Dynamic testing session complete!'));
+      if (warnings.length > 0) {
+        console.log(chalk.yellow(`\n⚠️ Completed with warnings:`));
+        warnings.forEach(w => console.log(chalk.yellow(`  • ${w}`)));
+      }
+      console.log(chalk.green.bold('\n🎉 Dynamic testing session complete!'));
     console.log(chalk.gray(`Results saved to: ${outputDir}`));
     console.log(chalk.gray(`\nOutput files:`));
     console.log(chalk.gray(`  • evidence/              - Individual finding details`));

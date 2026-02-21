@@ -13,7 +13,7 @@ export class ResponseAnalyzer {
    * @private
    */
   static _getBodyText(response) {
-    if (!response?.body && response?.body !== '') return '';
+    if (response?.body == null) return '';
     if (typeof response.body === 'string') return response.body;
     try {
       return JSON.stringify(response.body);
@@ -123,13 +123,8 @@ export class ResponseAnalyzer {
    * @returns {object} Comparison result
    */
   static compareBooleanResponses(trueResponse, falseResponse) {
-    const trueBody = typeof trueResponse.body === 'string' 
-      ? trueResponse.body 
-      : JSON.stringify(trueResponse.body);
-    
-    const falseBody = typeof falseResponse.body === 'string'
-      ? falseResponse.body
-      : JSON.stringify(falseResponse.body);
+    const trueBody = this._getBodyText(trueResponse);
+    const falseBody = this._getBodyText(falseResponse);
 
     // Compare response lengths
     const lengthDiff = Math.abs(trueBody.length - falseBody.length);
@@ -271,11 +266,12 @@ export class ResponseAnalyzer {
       generic: [
         /blocked.*security/i,
         /request.*blocked/i,
-        /access denied/i,
-        /forbidden/i,
+        /request.*has been.*blocked/i,
         /security.*violation/i,
         /your request has been blocked/i,
-        /suspicious.*activity/i
+        /suspicious.*activity/i,
+        /web application firewall/i,
+        /blocked by.*(?:security|firewall|protection)/i
       ]
     };
 
@@ -333,7 +329,9 @@ export class ResponseAnalyzer {
         /azureenvironment/i
       ],
       internalServices: [
-        /root:.*:0:0/i,      // /etc/passwd content
+        /root:.*:0:0/i      // /etc/passwd content — strong SSRF indicator
+      ],
+      internalNetwork: [
         /localhost/i,
         /127\.0\.0\.1/i,
         /0\.0\.0\.0/i,
@@ -344,13 +342,17 @@ export class ResponseAnalyzer {
     };
 
     for (const [source, patterns] of Object.entries(ssrfPatterns)) {
+      // Bare internal IP/hostname matches get LOW confidence — they appear
+      // in normal API responses (e.g. {"server": "localhost:3000"}).
+      // Cloud metadata and /etc/passwd patterns get HIGH confidence.
+      const confidence = source === 'internalNetwork' ? 'LOW' : 'HIGH';
       for (const pattern of patterns) {
         if (pattern.test(bodyText)) {
           return {
             detected: true,
             source,
             pattern: pattern.source,
-            confidence: 'HIGH'
+            confidence
           };
         }
       }
@@ -451,14 +453,14 @@ export class ResponseAnalyzer {
     
     // Try to parse as JSON first
     try {
-      const json = typeof response.body === 'object' 
-        ? response.body 
+      const json = (typeof response.body === 'object' && response.body !== null)
+        ? response.body
         : JSON.parse(bodyText);
-      
+
       if (Array.isArray(json)) {
         return json;
       }
-      if (json.results || json.data) {
+      if (json != null && (json.results || json.data)) {
         return json.results || json.data;
       }
     } catch (e) {

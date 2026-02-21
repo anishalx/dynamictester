@@ -1,0 +1,36 @@
+{
+  "findingId": "SEMGREP-javascript.express.security.audit.express-res-sendfile.express-res-sendfile-logfileServer.ts-14-57234c5ec539",
+  "timestamp": "2026-02-21T02:18:53.568Z",
+  "sourceLocation": {
+    "file": "routes/logfileServer.ts",
+    "line": 14,
+    "column": null
+  },
+  "vulnerability": {
+    "type": "PathTraversal",
+    "cwe": "CWE-73: External Control of File Name or Path",
+    "owasp": null,
+    "xssType": null,
+    "injectionContext": null,
+    "secretType": null
+  },
+  "exploitation": {
+    "endpoint": "http://localhost:3000/logs?file={file}",
+    "method": "GET",
+    "payload": "../../../etc/passwd",
+    "response": "HTTP 200 — application HTML",
+    "success": false,
+    "proof": "Performed dynamic tests against /logs?file parameter. Attempts:\n1) payload='../../../etc/passwd' — GET http://localhost:3000/logs?file=../../../etc/passwd — HTTP 200; response body contained Juice Shop HTML (no file contents).\n2) payload='..%2f..%2f..%2fetc/passwd' — GET ...?file=..%2f..%2f..%2fetc/passwd — HTTP 200; application HTML returned.\n3) payload='..%252f..%252f..%252fetc%252fpasswd' — GET ...?file=..%252f..%252f..%252fetc%252fpasswd — HTTP 200; application HTML returned.\n4) payload='....//....//....//etc/passwd' — GET ...?file=....//....//....//etc/passwd — HTTP 200; application HTML returned.\n5) payload='../../../etc/passwd%00' — GET ...?file=../../../etc/passwd%00 — HTTP 200; application HTML returned.\nObservations: All responses returned the application's HTML page. No filesystem contents were returned. After 5+ distinct encodings/techniques were tried with no file reads, classification is NOT_REPRODUCIBLE for this endpoint under current conditions."
+  },
+  "remediation": "Validate and canonicalize user-supplied paths; use safe path join and restrict to allowed directory; avoid passing raw user input to res.sendFile.",
+  "classification": "NOT_REPRODUCIBLE",
+  "status": "NOT_REPRODUCIBLE",
+  "level": 0,
+  "levelName": "No Exploitation",
+  "confidence": "N/A",
+  "classificationReason": "No evidence of exploitability after exhaustive testing",
+  "includeInReport": false,
+  "requiresAction": false,
+  "ciExitCode": 0,
+  "httpRequestsMade": 2
+}

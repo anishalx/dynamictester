@@ -1,0 +1,36 @@
+{
+  "findingId": "SEMGREP-javascript.express.security.injection.raw-html-format.raw-html-format-chatbot.ts-197-eb5dbcdf73ea",
+  "timestamp": "2026-02-21T02:20:19.800Z",
+  "sourceLocation": {
+    "file": "routes/chatbot.ts",
+    "line": 197,
+    "column": null
+  },
+  "vulnerability": {
+    "type": "ReflectedXSS",
+    "cwe": "CWE-79",
+    "owasp": "A07:2017 - XSS",
+    "xssType": null,
+    "injectionContext": "HTML/JSON (server parses JSON)",
+    "secretType": null
+  },
+  "exploitation": {
+    "endpoint": "http://localhost:3000/chatbot",
+    "method": "POST/GET",
+    "payload": "POST /chatbot with JSON bodies: 1) {\"message\":\"<script>window.__xss_chatbot=1</script>\"} 2) {\"message\":\"<img src=x onerror=window.__xss_chatbot=1>\"} 3) GET /chatbot?message=<script>window.__xss_chatbot=1</script>",
+    "response": null,
+    "success": false,
+    "proof": "No DOM execution observed. Server-side JSON parse error observed for malformed payload indicating input reached server. No window flag detected via browser_execute_script."
+  },
+  "remediation": null,
+  "classification": "NOT_REPRODUCIBLE",
+  "status": "NOT_REPRODUCIBLE",
+  "level": 0,
+  "levelName": "No Exploitation",
+  "confidence": "N/A",
+  "classificationReason": "No evidence of exploitability after exhaustive testing",
+  "includeInReport": false,
+  "requiresAction": false,
+  "ciExitCode": 0,
+  "httpRequestsMade": 4
+}
