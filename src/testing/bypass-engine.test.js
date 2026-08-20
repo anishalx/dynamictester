@@ -215,7 +215,7 @@ describe('BypassEngine', () => {
   describe('state management', () => {
     it('should track attempts', () => {
       const result = engine.generateBypasses(
-        "test",
+        "' OR '1'='1'--",
         { httpStatus: 403 },
         { vulnerabilityType: 'injection' },
         {}

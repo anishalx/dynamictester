@@ -33,7 +33,8 @@ import {
 // ---------------------------------------------------------------------------
 
 const args = process.argv.slice(2);
-const subcommand = args[0];
+// Determine subcommand: first positional arg that doesn't start with --
+const subcommand = args.find(a => !a.startsWith('--')) || null;
 
 // Parse --provider and --model CLI flags (e.g. --provider=google --model=gemini-2.5-pro)
 const cliProvider = args.find(a => a.startsWith('--provider='))?.split('=')[1];
@@ -44,10 +45,51 @@ const isCIMode = args.includes('--ci');
 const ciFailOnLikely = args.includes('--fail-on-likely');
 const ciFailOnBlocked = args.includes('--fail-on-blocked');
 
+// Parse --dry-run flag (preview queues without running exploitation)
+const isDryRun = args.includes('--dry-run');
+
+// Parse --types flag (filter which vulnerability types to test, comma-separated)
+const cliTypesRaw = args.find(a => a.startsWith('--types='))?.split('=')[1]?.trim();
+const cliTypes = cliTypesRaw ? cliTypesRaw.split(',').map(t => t.trim().toLowerCase()) : null;
+
+// Parse --scan-summary flag (show summary of past scan results)
+const isScanSummary = args.includes('--scan-summary');
+
 // Parse CI-compatible CLI args for non-interactive mode
 const cliTarget = args.find(a => a.startsWith('--target='))?.split('=')[1]?.trim();
 const cliResults = args.find(a => a.startsWith('--results='))?.split('=')[1]?.trim();
 const cliOutput = args.find(a => a.startsWith('--output='))?.split('=')[1]?.trim();
+
+// Parse --help flag
+const isHelp = args.includes('--help') || args.includes('-h');
+
+if (isHelp && !subcommand) {
+  console.log(chalk.cyan.bold('\n🔍 Dynamic Security Tester — CLI Reference\n'));
+  console.log(chalk.white('Usage:'));
+  console.log(chalk.gray('  node src/main.js [flags]                   Interactive mode'));
+  console.log(chalk.gray('  node src/main.js auth login|status|logout   Manage LLM provider credentials'));
+  console.log(chalk.gray('  node src/main.js --scan-summary [output=DIR] Show summary of past scan results\n'));
+  console.log(chalk.white('CLI Flags:'));
+  console.log(chalk.gray('  --provider=<name>       Override LLM provider (openai, deepseek, qwen, copilot, google, openrouter, nvidia)'));
+  console.log(chalk.gray('  --model=<name>          Override LLM model (e.g., gpt-4o, gemini-2.5-pro)'));
+  console.log(chalk.gray('  --types=<types>         Filter vuln types to test (comma-separated, e.g., injection,xss)'));
+  console.log(chalk.gray('  --dry-run               Preview exploitation queues without running tests'));
+  console.log(chalk.gray('  --scan-summary          Show summary of past scan results'));
+  console.log(chalk.gray('  --ci                    Enable CI/CD mode with exit codes'));
+  console.log(chalk.gray('  --target=<url>          Target URL (required in CI mode)'));
+  console.log(chalk.gray('  --results=<paths>       Analyzer result files, comma-separated (required in CI mode)'));
+  console.log(chalk.gray('  --output=<dir>          Output directory for reports'));
+  console.log(chalk.gray('  --fail-on-likely        In CI mode, also fail for LIKELY findings'));
+  console.log(chalk.gray('  --fail-on-blocked       In CI mode, also fail for BLOCKED findings'));
+  console.log(chalk.gray('  -h, --help              Show this help message\n'));
+  console.log(chalk.white('Examples:'));
+  console.log(chalk.gray('  node src/main.js'));
+  console.log(chalk.gray('  node src/main.js --provider=google --model=gemini-2.5-pro'));
+  console.log(chalk.gray('  node src/main.js --types=injection,xss --dry-run'));
+  console.log(chalk.gray('  node src/main.js --ci --target=http://localhost:3000 --results=semgrep.json'));
+  console.log(chalk.gray('  node src/main.js --scan-summary --output=./output\n'));
+  process.exit(0);
+}
 
 if (subcommand === 'auth') {
   const action = args[1]; // login | status | logout
@@ -69,6 +111,8 @@ if (subcommand === 'auth') {
     console.error(chalk.red(`\nAuth error: ${authError.message}`));
     process.exit(1);
   }
+} else if (isScanSummary) {
+  await scanSummary();
 } else {
   await main();
 }
@@ -375,6 +419,13 @@ async function main() {
     const warnings = [];
 
     for (const [type, queue] of Object.entries(queues)) {
+      // --types flag: skip types not in the filter list
+      if (cliTypes && !cliTypes.includes(type)) {
+        if (queue.length > 0) {
+          console.log(chalk.gray(`\n⏭️  Skipping ${type.toUpperCase()} (${queue.length} vulns) — not in --types filter`));
+        }
+        continue;
+      }
       if (queue.length > 0) {
         console.log(chalk.cyan(`\n🎯 Found ${queue.length} ${type.toUpperCase()} vulnerabilities:`));
         
@@ -399,6 +450,14 @@ async function main() {
             }
           ]);
           runTests = confirmation.runTests;
+        }
+
+        if (runTests && isDryRun) {
+          // Dry run mode: just show the queue summary without running exploitation
+          console.log(chalk.gray(`   📋 [DRY RUN] Would test ${queue.length} ${type.toUpperCase()} vulnerabilities`));
+          console.log(chalk.gray(`   Queue: ${path.resolve(outputDir, 'deliverables', `${type}_exploitation_queue.json`)}`));
+          console.log(chalk.gray(`   Prompt: ${promptMapping[type] || 'exploit-generic.txt'}`));
+          continue;
         }
 
         if (runTests) {
@@ -426,6 +485,26 @@ async function main() {
           });
         }
       }
+    }
+
+    if (isDryRun) {
+      // Dry run mode: show summary of what would be tested
+      console.log(chalk.cyan.bold('\n📋 Dry Run Summary'));
+      console.log(chalk.gray('─'.repeat(60)));
+      let totalWouldTest = 0;
+      for (const [type, queue] of Object.entries(queues)) {
+        if (cliTypes && !cliTypes.includes(type)) continue;
+        if (queue.length > 0) {
+          console.log(chalk.gray(`   ${type}: ${queue.length} vulnerabilities`));
+          totalWouldTest += queue.length;
+        }
+      }
+      console.log(chalk.cyan(`\n   Total to test: ${totalWouldTest} vulnerabilities`));
+      console.log(chalk.gray(`   Provider: ${providerName}/${modelId}`));
+      console.log(chalk.gray(`   Target: ${targetUrl}`));
+      console.log(chalk.gray('\n   Remove --dry-run to execute the exploitation.'));
+      console.log('');
+      process.exit(0);
     }
 
     if (plannedAgents.length > 0) {
@@ -685,6 +764,121 @@ async function selectProviderAndModel() {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Scan Summary command
+// ---------------------------------------------------------------------------
+
+/**
+ * Show a quick summary of past scan results from the output directory.
+ * Reads findings_summary.json, evidence files, and CI report.
+ */
+async function scanSummary() {
+  const outputDir = cliOutput || './output';
+  
+  console.log(chalk.cyan.bold('\n📊 Scan Summary'));
+  console.log(chalk.gray('─'.repeat(60)));
+  console.log(chalk.gray(`Output directory: ${outputDir}`));
+  console.log(chalk.gray('─'.repeat(60)));
+
+  const summaryPath = path.join(outputDir, 'findings_summary.json');
+  const evidenceDir = path.join(outputDir, 'evidence');
+  const ciReportPath = path.join(outputDir, 'ci-report.json');
+  
+  let findings = [];
+
+  // Try reading findings_summary.json
+  try {
+    findings = await fs.readJSON(summaryPath);
+    if (!Array.isArray(findings)) findings = [];
+  } catch (e) {
+    // Fall back to reading evidence files
+    try {
+      if (await fs.pathExists(evidenceDir)) {
+        const files = await fs.readdir(evidenceDir);
+        for (const file of files) {
+          if (file.endsWith('.json') && file.startsWith('evidence-')) {
+            try {
+              const data = await fs.readJSON(path.join(evidenceDir, file));
+              findings.push(data);
+            } catch (e) { /* skip corrupt files */ }
+          }
+        }
+      }
+    } catch (e) { /* directory doesn't exist */ }
+  }
+
+  if (findings.length === 0) {
+    console.log(chalk.yellow('\n⚠️  No findings found. Run a scan first.'));
+    console.log(chalk.gray(`  Looked for: ${summaryPath}`));
+    console.log(chalk.gray(`  Looked for: ${evidenceDir}`));
+    process.exit(0);
+  }
+
+  // Classify findings
+  const confirmed = findings.filter(f => (f.classification || f.status) === 'CONFIRMED');
+  const likely = findings.filter(f => (f.classification || f.status) === 'LIKELY');
+  const blocked = findings.filter(f => (f.classification || f.status) === 'BLOCKED');
+  const notReproducible = findings.filter(f => {
+    const c = f.classification || f.status;
+    return c === 'NOT_REPRODUCIBLE' || c === 'TESTED_NOT_EXPLOITABLE';
+  });
+
+  // Group by type
+  const byType = {};
+  for (const f of findings) {
+    const t = f.type || f.vulnerability?.type || 'Unknown';
+    byType[t] = (byType[t] || 0) + 1;
+  }
+
+  console.log(chalk.green(`\n✅ Total findings: ${findings.length}`));
+  console.log(chalk.red(`   🔴 CONFIRMED:        ${confirmed.length}`));
+  console.log(chalk.yellow(`   🟡 LIKELY:           ${likely.length}`));
+  console.log(chalk.magenta(`   🟠 BLOCKED:          ${blocked.length}`));
+  console.log(chalk.green(`   🟢 NOT REPRODUCIBLE: ${notReproducible.length}`));
+
+  if (confirmed.length > 0) {
+    console.log(chalk.red('\n🔴 Confirmed Exploits:'));
+    for (const f of confirmed) {
+      const loc = f.sourceLocation || {};
+      console.log(chalk.red(`   • ${loc.file || f.file || 'unknown'}:${loc.line || f.line || '?'} — ${f.vulnerability?.type || f.type || 'Unknown'} (Level ${f.level ?? '?'})`));
+      if (f.exploitation?.endpoint) {
+        console.log(chalk.gray(`     Endpoint: ${f.exploitation.endpoint}`));
+      }
+    }
+  }
+
+  if (likely.length > 0) {
+    console.log(chalk.yellow('\n🟡 Likely Exploits:'));
+    for (const f of likely.slice(0, 10)) {
+      const loc = f.sourceLocation || {};
+      console.log(chalk.yellow(`   • ${loc.file || f.file || 'unknown'}:${loc.line || f.line || '?'} — ${f.vulnerability?.type || f.type || 'Unknown'}`));
+    }
+    if (likely.length > 10) {
+      console.log(chalk.yellow(`   ... and ${likely.length - 10} more`));
+    }
+  }
+
+  // Type breakdown
+  if (Object.keys(byType).length > 0) {
+    console.log(chalk.cyan('\n📊 By Vulnerability Type:'));
+    const sorted = Object.entries(byType).sort(([, a], [, b]) => b - a);
+    for (const [type, count] of sorted) {
+      console.log(chalk.cyan(`   ${type}: ${count}`));
+    }
+  }
+
+  // CI report if available
+  try {
+    const ciReport = await fs.readJSON(ciReportPath);
+    console.log(chalk.gray(`\n📋 Last CI Report: ${ciReport.exitReason || 'N/A'}`));
+    console.log(chalk.gray(`   Exit code: ${ciReport.exitCode}`));
+    console.log(chalk.gray(`   Generated: ${ciReport.timestamp || 'N/A'}`));
+  } catch (e) { /* no CI report */ }
+
+  console.log('');
+  process.exit(0);
+}
 
 async function createGenericPrompt(promptPath) {
   const genericPrompt = `<role>

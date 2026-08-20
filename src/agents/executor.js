@@ -601,6 +601,10 @@ If the system nudges you about stalls, check your plan for pending tasks and res
   // Enhanced evidence collection tool with developer-friendly output
   // Integrates the 4-level VulnerabilityClassifier for accurate status assignment
   async function save_evidence(params) {
+    // Defensive: ensure params is an object
+    if (!params || typeof params !== 'object') {
+      return { status: 'error', message: 'save_evidence requires a parameters object' };
+    }
     const {
       id, type, evidence, payload, success,
       // New source mapping fields
@@ -790,7 +794,8 @@ If the system nudges you about stalls, check your plan for pending tasks and res
 
   // Read queue file tool - returns ALL vulnerabilities (no limit)
   // Path is restricted to the output directory or the original queue path
-  async function read_queue_file({ filePath }) {
+  async function read_queue_file(params) {
+    const { filePath } = params || {};
     try {
       const resolvedPath = path.resolve(filePath || queuePath);
       const resolvedOutputDir = path.resolve(outputDir);
