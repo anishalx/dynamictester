@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import { CIReporter } from './ci-reporter.js';
 import { fs, path } from 'zx';
 
@@ -17,14 +18,18 @@ describe('CIReporter', () => {
   });
 
   async function writeEvidence(classification, overrides = {}) {
+    // randomUUID keeps filenames unique even when two writes land in the
+    // same millisecond (Date.now() allowed a fast second write to overwrite
+    // the first, making this test flaky on fast CI runners).
+    const id = randomUUID();
     const finding = {
-      findingId: `test-${Date.now()}`,
+      findingId: `test-${id}`,
       classification,
       status: classification,
       level: classification === 'CONFIRMED' ? 3 : 0,
       ...overrides
     };
-    const filePath = path.join(evidenceDir, `evidence-test-${Date.now()}.json`);
+    const filePath = path.join(evidenceDir, `evidence-test-${id}.json`);
     await fs.writeJSON(filePath, finding);
   }
 

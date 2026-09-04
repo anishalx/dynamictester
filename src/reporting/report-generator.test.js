@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import { generateSarifReport, generateHtmlReport, generateDeveloperSummary, generateAllReports } from './report-generator.js';
 import { fs, path } from 'zx';
 
@@ -54,7 +55,7 @@ describe('ReportGenerator', () => {
 
   async function writeEvidenceFiles(findings) {
     for (const f of findings) {
-      const filePath = path.join(evidenceDir, `evidence-${f.findingId}-${Date.now()}.json`);
+      const filePath = path.join(evidenceDir, `evidence-${f.findingId}-${randomUUID()}.json`);
       await fs.writeJSON(filePath, f, { spaces: 2 });
     }
   }
