@@ -32,6 +32,12 @@ import {
 // Subcommand routing
 // ---------------------------------------------------------------------------
 
+const DISCLAIMER = chalk.yellow(
+  '\n[!] Dynamic Security Tester performs active exploitation against the target.\n' +
+  '    Use it ONLY against systems you own or have explicit written permission\n' +
+  '    to test. Unauthorized testing is illegal in most jurisdictions.\n'
+);
+
 const args = process.argv.slice(2);
 // Determine subcommand: first positional arg that doesn't start with --
 const subcommand = args.find(a => !a.startsWith('--')) || null;
@@ -114,6 +120,7 @@ if (subcommand === 'auth') {
 } else if (isScanSummary) {
   await scanSummary();
 } else {
+  console.log(DISCLAIMER);
   await main();
 }
 
