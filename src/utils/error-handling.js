@@ -257,9 +257,12 @@ export function classifyError(error) {
     return 'SERVER_ERROR';
   }
 
-  // Timeout — check status 408 and message patterns
+  // Timeout — check status 408 and message patterns.
+  // 'timed out' / 'time out' phrasing is handled explicitly: isRetryableError
+  // already retries on it, so classifying it as UNKNOWN was inconsistent.
   if (status === 408 ||
       /\btimeout\b/i.test(message) ||
+      /\btimed?\s*out\b/i.test(message) ||
       /\betimedout\b/i.test(message)) {
     return 'TIMEOUT';
   }

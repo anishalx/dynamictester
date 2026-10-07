@@ -209,6 +209,13 @@ describe('Error Handling Utilities', () => {
       expect(classifyError(err)).toBe('TIMEOUT');
     });
 
+    it('should classify "timed out" phrasing as TIMEOUT (consistent with isRetryableError)', () => {
+      // isRetryableError treats these as timeouts, so classifyError must too —
+      // otherwise retries are logged under the wrong category.
+      expect(classifyError(new Error('Request timed out.'))).toBe('TIMEOUT');
+      expect(classifyError(new Error('connection timed out'))).toBe('TIMEOUT');
+    });
+
     it('should classify network errors', () => {
       const err = new Error('fetch failed');
       expect(classifyError(err)).toBe('NETWORK_ERROR');

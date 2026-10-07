@@ -257,7 +257,10 @@ export class ResponseAnalyzer {
       akamai: [/akamai/i, /akamai.*ghost/i, /x-akamai-transformed/i],
       imperva: [/imperva/i, /incapsula/i, /visid_incap/i],
       modsecurity: [/mod_security/i, /modsec/i, /NOYB/i],
-      awswaf: [/aws.*waf/i, /awselb/i, /x-amzn-requestid/i, /request blocked.*aws/i],
+      // NOTE: 'x-amzn-requestid' and the 'awselb' server banner are attached to
+      // EVERY AWS API Gateway / ALB response (including successful ones), so
+      // they are not block signals. Only WAF-specific markers count.
+      awswaf: [/aws.*waf/i, /request blocked.*aws/i, /x-amzn-waf-action/i],
       azureFrontDoor: [/azure.*front.*door/i, /afd-/i],
       f5BigIP: [/big-?ip/i, /f5.*network/i, /TS[0-9a-f]{8}/i],
       sucuri: [/sucuri/i, /x-sucuri/i],
@@ -415,15 +418,15 @@ export class ResponseAnalyzer {
       };
     }
 
-    // Check for common XSS indicators
+    // Check for common XSS indicators.
+    // Each pattern requires a real JavaScript execution sink (alert/prompt/
+    // confirm). Bare event-handler attributes (onload=, onmouseover=) and
+    // javascript: URLs appear on countless benign pages and were reported as
+    // reflected XSS — a false positive the agent then acted on.
     const xssPatterns = [
-      /<script[^>]*>.*?alert/i,
-      /onerror\s*=/i,
-      /onload\s*=/i,
-      /onmouseover\s*=/i,
-      /javascript:/i,
-      /<svg[^>]*onload/i,
-      /<img[^>]*onerror/i
+      /<script[^>]*>[\s\S]*?alert\s*\(/i,
+      /\bon\w+\s*=\s*["']?[^"'>]{0,80}?\b(?:alert|prompt|confirm)\s*\(/i,
+      /javascript:\s*(?:alert|prompt|confirm)\s*\(/i
     ];
 
     for (const pattern of xssPatterns) {

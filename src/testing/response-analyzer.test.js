@@ -134,6 +134,60 @@ describe('ResponseAnalyzer', () => {
 
       expect(result.detected).toBe(false);
     });
+
+    it('should NOT flag a normal AWS API Gateway response carrying x-amzn-requestid', () => {
+      // x-amzn-requestid is attached to EVERY AWS API Gateway / ALB response,
+      // including successful ones — it is a request ID, not a block signal.
+      const response = {
+        body: '{"ok": true}',
+        status: 200,
+        headers: { 'x-amzn-requestid': 'abc-123', 'content-type': 'application/json' }
+      };
+      expect(ResponseAnalyzer.detectWAFBlocking(response).detected).toBe(false);
+    });
+
+    it('should NOT flag a normal ALB response carrying the awselb server banner', () => {
+      const response = {
+        body: '{"ok": true}',
+        status: 200,
+        headers: { server: 'awselb/2.0' }
+      };
+      expect(ResponseAnalyzer.detectWAFBlocking(response).detected).toBe(false);
+    });
+
+    it('should still detect a genuine AWS WAF block', () => {
+      const response = {
+        body: 'Request blocked by AWS WAF',
+        status: 403
+      };
+      const result = ResponseAnalyzer.detectWAFBlocking(response);
+      expect(result.detected).toBe(true);
+    });
+  });
+
+  describe('detectXSSReflection', () => {
+    it('should detect an unescaped reflected payload (exact match)', () => {
+      const response = { body: '<div><script>alert(1)</script></div>', status: 200 };
+      const result = ResponseAnalyzer.detectXSSReflection(response, '<script>alert(1)</script>');
+      expect(result.detected).toBe(true);
+    });
+
+    it('should detect a reflected event-handler payload with an execution sink', () => {
+      const response = { body: '<img src=x onerror=alert(1)>', status: 200 };
+      const result = ResponseAnalyzer.detectXSSReflection(response);
+      expect(result.detected).toBe(true);
+    });
+
+    it('should NOT flag benign onload=/javascript:/onmouseover= markup', () => {
+      // No payload argument is the real call path (see executor.js). Pages that
+      // merely contain an event-handler attribute or a javascript: link are
+      // extremely common and must not be reported as reflected XSS.
+      const response = {
+        body: '<html><body onload="init()"><a href="javascript:void(0)">x</a><img onmouseover="hover()"></body></html>',
+        status: 200
+      };
+      expect(ResponseAnalyzer.detectXSSReflection(response).detected).toBe(false);
+    });
   });
 
   describe('isValidationError', () => {
