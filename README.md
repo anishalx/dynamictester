@@ -167,8 +167,8 @@ dynamictester/
 │   │   ├── response-analyzer.js         # DB error detection, WAF detection, SSRF/XXE/XSS analysis
 │   │   ├── test-interface.js            # VulnerabilityTester base class (confirm -> fingerprint -> exploit)
 │   │   ├── bypass-engine.test.js        # Tests for bypass engine (18 tests)
-│   │   ├── payload-generator.test.js    # Tests for payload generator (88 tests)
-│   │   └── response-analyzer.test.js    # Tests for response analyzer (27 tests)
+│   │   ├── payload-generator.test.js    # Tests for payload generator (98 tests)
+│   │   └── response-analyzer.test.js    # Tests for response analyzer (33 tests)
 │   │
 │   └── utils/
 │       ├── error-handling.js            # Error classification, retry eligibility, delay calculation
@@ -973,7 +973,7 @@ Add to the categorization map in `src/parser/normalizer.js` and the queue bucket
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `vitest` | ^4.0.18 | Test runner (133 tests) |
+| `vitest` | ^4.0.18 | Test runner (369 tests) |
 
 ---
 
@@ -988,7 +988,7 @@ ISC
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes (follow conventions in `AGENTS.md`)
-4. Run `npm test` to verify all 133 tests pass
+4. Run `npm test` to verify all 369 tests pass
 5. Submit a pull request
 
 Key areas for contribution:
